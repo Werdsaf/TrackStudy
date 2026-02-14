@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход — Мониторинг посещаемости</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1 class="logo">Мониторинг студентов</h1>
+    </header>
+
+    <main style="max-width: 400px; margin: 4rem auto; text-align: center;">
+      <h2>Вход в систему</h2>
+
+      <form id="login-form" style="text-align: left; margin-top: 1.5rem;">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="password">Пароль</label>
+          <input type="password" id="password" name="password" required>
+        </div>
+        <button type="submit" class="btn">Войти</button>
+      </form>
+
+      <p style="margin-top: 1.5rem; color: #6b7280;">
+        Нет аккаунта? 
+        <a href="register.html" style="color: var(--primary); text-decoration: none; font-weight: 600;">
+          Зарегистрироваться
+        </a>
+      </p>
+    </main>
+  </div>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.token) {
+          localStorage.setItem('token', data.token);
+          alert('✅ Успешный вход!');
+          window.location.href = 'create-group.html';
+        } else {
+          alert(data.error || 'Неверный email или пароль');
+        }
+      } catch (err) {
+        console.error('Ошибка входа:', err);
+        alert('Сеть недоступна. Проверьте соединение.');
+      }
+    });
+  </script>
+</body>
+</html>

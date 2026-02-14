@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Отметка посещаемости</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">Мониторинг студентов</div>
+      <div class="nav-links">
+        <a href="create-group.html">Группы</a>
+        <a href="mark-attendance.html" class="active">Отметка</a>
+        <a href="view-attendance.html">Просмотр</a>
+        <a href="#" onclick="logout()">Выход</a>
+      </div>
+    </header>
+
+    <main style="max-width: 800px; margin: 2rem auto;">
+      <h2>Отметка посещаемости</h2>
+
+      <!-- Форма выбора -->
+      <div class="form-group">
+        <label>Группа</label>
+        <select id="group-select" onchange="loadLessons()"></select>
+      </div>
+      <div class="form-group">
+        <label>Дата</label>
+        <input type="date" id="date-picker" onchange="loadLessons()" required>
+      </div>
+      <div class="form-group">
+        <label>Занятие</label>
+        <select id="lesson-select" disabled>
+          <option>Выберите группу и дату</option>
+        </select>
+        <button type="button" class="btn btn-outline" style="margin-left: 0.5rem;" onclick="openCreateLessonModal()">
+          + Создать занятие
+        </button>
+      </div>
+      <button type="button" class="btn" onclick="loadStudents()">Загрузить студентов</button>
+
+      <!-- Список студентов -->
+      <div id="attendance-grid" class="attendance-grid"></div>
+      <button type="button" class="btn" onclick="saveAttendance()">Сохранить все</button>
+    </main>
+
+    <!-- Модалка создания занятия -->
+    <div id="lesson-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:white; margin:10% auto; padding:2rem; width:90%; max-width:500px; border-radius:8px;">
+        <h3>Создать новое занятие</h3>
+        <div class="form-group">
+          <label>Дата</label>
+          <input type="date" id="modal-date" required>
+        </div>
+        <div class="form-group">
+          <label>Номер занятия</label>
+          <input type="number" id="modal-lesson-num" min="1" required value="1">
+        </div>
+        <div class="form-group">
+          <label>Тема (название)</label>
+          <input type="text" id="modal-title" placeholder="Напр. Лекция 3. Базы данных" required>
+        </div>
+        <div class="form-group">
+          <label>ID группы</label>
+          <input type="number" id="modal-group-id" required placeholder="См. в разделе 'Группы'">
+        </div>
+        <div class="form-group">
+          <label>Подгруппа (опц.)</label>
+          <input type="text" id="modal-subgroups" placeholder="ID студентов через запятую: 1,3,5">
+          <p style="font-size:0.85rem; color:#6b7280;">Оставьте пустым — занятие для всей группы</p>
+        </div>
+        <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+          <button type="button" class="btn" onclick="createLesson()">Создать</button>
+          <button type="button" class="btn btn-outline" onclick="closeModal()">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Сначала войдите в систему.');
+      window.location.href = 'index.html';
+      exit;
+    }
+
+    // Загрузить группы
+    async function loadGroups() {
+      try {
+        const res = await fetch('/api/groups', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const groups = await res.json();
+        const sel = document.getElementById('group-select');
+        sel.innerHTML = '<option>Выберите группу</option>';
+        groups.forEach(g => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = `${g.name} (${g.id})`;
+          sel.appendChild(opt);
+        });
+      } catch (err) {
+        console.error('Ошибка загрузки групп:', err);
+        alert('Не удалось загрузить группы. Проверьте подключение к серверу.');
+      }
+    }
+
+    // Загрузить занятия по группе и дате
+    async function loadLessons() {
+      const groupId = document.getElementById('group-select').value;
+      const date = document.getElementById('date-picker').value;
+      const lessonSel = document.getElementById('lesson-select');
+
+      if (!groupId || !date) {
+        lessonSel.innerHTML = '<option>Выберите группу и дату</option>';
+        lessonSel.disabled = true;
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/lessons?group_id=${groupId}&date_from=${date}&date_to=${date}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const lessons = await res.json();
+
+        lessonSel.innerHTML = '<option>Выберите занятие</option>';
+        if (lessons.length === 0) {
+          lessonSel.innerHTML += '<option disabled>Занятия не найдены. Создайте занятие ниже.</option>';
+          lessonSel.disabled = true;
+          return;
+        }
+
+        lessons.forEach(l => {
+          const opt = document.createElement('option');
+          opt.value = l.id;
+          opt.textContent = `№${l.lesson_num}: ${l.title} (${l.date})`;
+          lessonSel.appendChild(opt);
+        });
+        lessonSel.disabled = false;
+      } catch (err) {
+        console.error('Ошибка загрузки занятий:', err);
+        lessonSel.innerHTML = '<option>Ошибка загрузки</option>';
+        lessonSel.disabled = true;
+      }
+    }
+
+    // Открыть модалку
+    function openCreateLessonModal() {
+      document.getElementById('lesson-modal').style.display = 'block';
+      // Подставить текущую дату и ID группы (если есть)
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-date').value = today;
+      const groupId = document.getElementById('group-select').value;
+      if (groupId) document.getElementById('modal-group-id').value = groupId;
+    }
+
+    function closeModal() {
+      document.getElementById('lesson-modal').style.display = 'none';
+    }
+
+    // Создать занятие
+    async function createLesson() {
+      const date = document.getElementById('modal-date').value;
+      const num = document.getElementById('modal-lesson-num').value;
+      const title = document.getElementById('modal-title').value.trim();
+      const groupId = document.getElementById('modal-group-id').value;
+      const subgroupsStr = document.getElementById('modal-subgroups').value.trim();
+
+      if (!date || !num || !title || !groupId) {
+        alert('Заполните все обязательные поля');
+        return;
+      }
+
+      let subgroups = null;
+      if (subgroupsStr) {
+        try {
+          subgroups = subgroupsStr.split(',').map(id => parseInt(id.trim()).toString()).filter(id => id);
+          if (subgroups.length === 0) subgroups = null;
+        } catch (e) {
+          alert('Некорректный формат подгруппы (должны быть числа через запятую)');
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch('/api/lessons', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            date,
+            lesson_num: parseInt(num),
+            title,
+            group_id: parseInt(groupId),
+            subgroups: subgroups
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          alert(`✅ Занятие "${title}" создано!`);
+          closeModal();
+          loadLessons(); // обновляем список занятий
+        } else {
+          alert(data.error || 'Ошибка создания занятия');
+        }
+      } catch (err) {
+        console.error('Ошибка создания занятия:', err);
+        alert('Сеть недоступна');
+      }
+    }
+
+    // Загрузить студентов для выбранного занятия
+    let currentLessonId = null;
+    async function loadStudents() {
+      const lessonId = document.getElementById('lesson-select').value;
+      if (!lessonId) {
+        alert('Выберите занятие');
+        return;
+      }
+      currentLessonId = lessonId;
+
+      const groupId = document.getElementById('group-select').value;
+      try {
+        const res = await fetch(`/api/attendance/group/${groupId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+
+        const grid = document.getElementById('attendance-grid');
+        grid.innerHTML = '';
+        data.forEach(student => {
+          const lesson = student.lessons.find(l => l.lesson_id == lessonId);
+          const status = lesson?.status || 'Н';
+
+          const card = document.createElement('div');
+          card.className = 'student-card';
+          card.innerHTML = `
+            <div class="student-name">${student.student.full_name}</div>
+            <select class="status-select" data-student-id="${student.student.id}">
+              <option value="Н" ${status==='Н'?'selected':''}>Н — Не отмечено</option>
+              <option value="П" ${status==='П'?'selected':''}>П — Присутствовал</option>
+              <option value="Б" ${status==='Б'?'selected':''}>Б — Болел</option>
+              <option value="НП" ${status==='НП'?'selected':''}>НП — Неуважительная</option>
+              <option value="УП" ${status==='УП'?'selected':''}>УП — Уважительная</option>
+            </select>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (err) {
+        console.error('Ошибка загрузки студентов:', err);
+        alert('Не удалось загрузить студентов');
+      }
+    }
+
+    // Сохранить посещаемость
+    async function saveAttendance() {
+      if (!currentLessonId) {
+        alert('Сначала выберите занятие и загрузите студентов');
+        return;
+      }
+
+      const selects = document.querySelectorAll('.status-select');
+      for (const sel of selects) {
+        const sid = sel.dataset.studentId;
+        const status = sel.value;
+        try {
+          await fetch(`/api/attendance/${currentLessonId}/students/${sid}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ status })
+          });
+        } catch (err) {
+          console.error(`Ошибка для студента ${sid}:`, err);
+          alert(`Ошибка сохранения для студента ${sid}. Проверьте соединение.`);
+          return;
+        }
+      }
+      alert('✅ Все отметки сохранены!');
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      window.location.href = 'index.html';
+    }
+
+    // Инициализация
+    loadGroups();
+  </script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+-- ================================================
+-- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ: Студенты и посещаемость
+-- ================================================
+
+-- 🛠️ Предварительно:
+-- 1. Подключитесь к PostgreSQL: psql -U postgres
+-- 2. Создайте базу: CREATE DATABASE attendance_db;
+-- 3. Подключитесь к ней: \c attendance_db
+-- 4. Выполните: \i sql/init.sql
+
+-- ================================================
+-- 1. Таблица пользователей (куратор)
+-- ================================================
+
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role VARCHAR(10) DEFAULT 'curator' CHECK (role = 'curator'),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ================================================
+-- 2. Таблица групп
+-- ================================================
+
+CREATE TABLE groups (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  created_by INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ================================================
+-- 3. Таблица студентов
+-- ================================================
+
+CREATE TABLE students (
+  id SERIAL PRIMARY KEY,
+  full_name VARCHAR(255) NOT NULL,
+  email VARCHAR(255), -- теперь НЕ уникальный и НЕ обязательный
+  group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ================================================
+-- 4. Таблица занятий
+-- ================================================
+
+CREATE TABLE lessons (
+  id SERIAL PRIMARY KEY,
+  date DATE NOT NULL,
+  lesson_num SMALLINT NOT NULL,
+  title VARCHAR(100) NOT NULL,
+  group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  subgroups JSONB, -- напр. [1, 2, 3] — IDs студентов подгруппы; NULL = вся группа
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ================================================
+-- 5. Таблица посещаемости
+-- ================================================
+
+CREATE TABLE attendance (
+  id SERIAL PRIMARY KEY,
+  student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  lesson_id INT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+  status VARCHAR(3) NOT NULL CHECK (status IN ('П', 'Б', 'НП', 'УП', 'Н')),
+  note TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Ограничение: один студент — одна запись на одно занятие
+  UNIQUE (student_id, lesson_id)
+);
+
+-- ================================================
+-- 6. Индексы для производительности
+-- ================================================
+
+-- Для быстрого поиска занятий по группе и дате
+CREATE INDEX idx_lessons_group_date ON lessons (group_id, date);
+
+-- Для быстрого поиска посещений по занятию
+CREATE INDEX idx_attendance_lesson ON attendance (lesson_id);
+
+-- Для быстрого поиска посещений по студенту
+CREATE INDEX idx_attendance_student ON attendance (student_id);
+
+-- ================================================
+-- 7. Примеры данных (опционально)
+-- ================================================
+
+-- INSERT INTO users (email, password, role) VALUES ('curator@example.com', '$2a$10$...', 'curator');
+-- INSERT INTO groups (name, description, created_by) VALUES ('ИТ-204', 'Группа второго курса', 1);
+-- INSERT INTO students (full_name, email, group_id) VALUES ('Иванов Иван', 'ivan@example.com', 1);
+-- INSERT INTO students (full_name, email, group_id) VALUES ('Петров Петр', NULL, 1);
+-- INSERT INTO lessons (date, lesson_num, title, group_id, subgroups) VALUES ('2026-02-15', 1, 'Введение в Node.js', 1, '[1,2]');
+-- INSERT INTO attendance (student_id, lesson_id, status, note) VALUES (1, 1, 'П', NULL);
+
+-- ================================================
+-- ✅ База данных готова!
+-- ================================================

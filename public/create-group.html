@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Создание группы и добавление студентов</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">Мониторинг студентов</div>
+      <div class="nav-links">
+        <a href="create-group.html" class="active">Группы</a>
+        <a href="mark-attendance.html">Отметка</a>
+        <a href="view-attendance.html">Просмотр</a>
+        <a href="#" onclick="logout()">Выход</a>
+      </div>
+    </header>
+
+    <main>
+      <h2>Создать группу</h2>
+      <form id="group-form">
+        <div class="form-group">
+          <label>Название группы</label>
+          <input type="text" id="group-name" required placeholder="Напр. ИТ-204">
+        </div>
+        <div class="form-group">
+          <label>Описание (опц.)</label>
+          <textarea id="group-desc" placeholder="Краткое описание"></textarea>
+        </div>
+        <button type="submit" class="btn">Создать группу</button>
+      </form>
+
+      <hr style="margin: 2rem 0;">
+
+      <h2>Добавить студентов в группу</h2>
+      <p style="color: #6b7280; margin-bottom: 1rem;">
+        🔹 Введите <strong>ID группы</strong> (см. список ниже или создайте группу выше)<br>
+        🔹 Email — не обязателен (можно оставить пустым)
+      </p>
+
+      <div class="form-group">
+        <label>ID группы</label>
+        <input type="number" id="group-id" placeholder="Напр. 3" required>
+      </div>
+
+      <div id="students-list">
+        <div class="student-input">
+          <input type="text" placeholder="ФИО студента" class="student-name" required>
+          <input type="email" placeholder="Email (не обязательно)" class="student-email">
+          <button type="button" class="btn btn-outline" onclick="addStudentInput()">+</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn" onclick="saveStudents()">Добавить студентов</button>
+
+      <div id="groups-list" style="margin-top: 2rem; padding: 1rem; background: #f9fafb; border-radius: 8px;">
+        <h3>Существующие группы</h3>
+        <ul id="group-items" style="list-style: none; padding: 0;">
+          <!-- заполняется JS -->
+        </ul>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Сначала войдите в систему.');
+      window.location.href = 'index.html';
+      exit;
+    }
+
+    // Загрузить список групп
+    async function loadGroups() {
+      try {
+        const res = await fetch('/api/groups', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const groups = await res.json();
+
+        const ul = document.getElementById('group-items');
+        if (groups.length === 0) {
+          ul.innerHTML = '<li>Группы отсутствуют. Создайте первую группу выше.</li>';
+          return;
+        }
+
+        ul.innerHTML = groups.map(g => 
+          `<li><strong>ID:</strong> ${g.id} | <strong>Название:</strong> ${g.name} ${g.description ? `— ${g.description}` : ''}</li>`
+        ).join('');
+      } catch (err) {
+        console.error('Ошибка загрузки групп:', err);
+        document.getElementById('group-items').innerHTML = '<li>Ошибка загрузки групп.</li>';
+      }
+    }
+
+    // Создать группу
+    document.getElementById('group-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('group-name').value.trim();
+      const desc = document.getElementById('group-desc').value.trim();
+
+      if (!name) {
+        alert('Укажите название группы');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/groups', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ name, description: desc })
+        });
+
+        const group = await res.json();
+        if (res.ok) {
+          alert(`✅ Группа "${group.name}" создана. ID: ${group.id}`);
+          loadGroups();
+          document.getElementById('group-name').value = '';
+          document.getElementById('group-desc').value = '';
+        } else {
+          alert(group.error || 'Ошибка создания группы');
+        }
+      } catch (err) {
+        alert('Сеть недоступна');
+      }
+    });
+
+    // Добавить новое поле студента
+    let studentInputs = [document.querySelector('.student-input')];
+    function addStudentInput() {
+      const div = document.createElement('div');
+      div.className = 'student-input';
+      div.innerHTML = `
+        <input type="text" placeholder="ФИО студента" class="student-name" required>
+        <input type="email" placeholder="Email (не обязательно)" class="student-email">
+        <button type="button" class="btn btn-outline" onclick="removeStudentInput(this)">×</button>
+      `;
+      document.getElementById('students-list').appendChild(div);
+      studentInputs.push(div);
+    }
+
+    function removeStudentInput(btn) {
+      btn.closest('.student-input').remove();
+    }
+
+    // Сохранить студентов
+    async function saveStudents() {
+      const groupId = parseInt(document.getElementById('group-id').value);
+      if (!groupId) {
+        alert('Введите корректный ID группы');
+        return;
+      }
+
+      const students = [];
+      document.querySelectorAll('.student-input').forEach(el => {
+        const name = el.querySelector('.student-name').value.trim();
+        const email = el.querySelector('.student-email').value.trim();
+        if (name) {
+          students.push({
+            full_name: name,
+            email: email || null  // NULL разрешён в БД
+          });
+        }
+      });
+
+      if (students.length === 0) {
+        alert('Добавьте хотя бы одного студента (ФИО обязательно)');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/groups/${groupId}/students`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(students)
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          alert(`✅ Добавлено ${students.length} студентов в группу ID=${groupId}`);
+          // Очистить поля
+          document.querySelectorAll('.student-input').forEach(el => {
+            el.querySelector('.student-name').value = '';
+            el.querySelector('.student-email').value = '';
+          });
+        } else {
+          alert(data.error || 'Ошибка добавления студентов');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Ошибка сети при отправке данных');
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      window.location.href = 'index.html';
+    }
+
+    // Инициализация
+    loadGroups();
+  </script>
+</body>
+</html>
