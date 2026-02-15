@@ -35,8 +35,9 @@
 
       <h2>Добавить студентов в группу</h2>
       <p style="color: #6b7280; margin-bottom: 1rem;">
-        🔹 Введите <strong>ID группы</strong> (см. список ниже или создайте группу выше)<br>
-        🔹 Email — не обязателен (можно оставить пустым)
+        🔹 Введите <strong>ID группы</strong> (см. список ниже)<br>
+        🔹 Email — не обязателен<br>
+        🔹 Подгруппа — не обязательна (можно оставить пустой)
       </p>
 
       <div class="form-group">
@@ -48,6 +49,7 @@
         <div class="student-input">
           <input type="text" placeholder="ФИО студента" class="student-name" required>
           <input type="email" placeholder="Email (не обязательно)" class="student-email">
+          <input type="text" placeholder="Подгруппа ()" class="student-subgroup">
           <button type="button" class="btn btn-outline" onclick="addStudentInput()">+</button>
         </div>
       </div>
@@ -71,7 +73,7 @@
       exit;
     }
 
-    // Загрузить список групп
+    // Загрузить группы
     async function loadGroups() {
       try {
         const res = await fetch('/api/groups', {
@@ -137,6 +139,7 @@
       div.innerHTML = `
         <input type="text" placeholder="ФИО студента" class="student-name" required>
         <input type="email" placeholder="Email (не обязательно)" class="student-email">
+        <input type="text" placeholder="Подгруппа (напр. 3, А)" class="student-subgroup">
         <button type="button" class="btn btn-outline" onclick="removeStudentInput(this)">×</button>
       `;
       document.getElementById('students-list').appendChild(div);
@@ -159,10 +162,12 @@
       document.querySelectorAll('.student-input').forEach(el => {
         const name = el.querySelector('.student-name').value.trim();
         const email = el.querySelector('.student-email').value.trim();
+        const subgroup = el.querySelector('.student-subgroup').value.trim();
         if (name) {
           students.push({
             full_name: name,
-            email: email || null  // NULL разрешён в БД
+            email: email || null,
+            subgroup_name: subgroup || null
           });
         }
       });
@@ -189,6 +194,7 @@
           document.querySelectorAll('.student-input').forEach(el => {
             el.querySelector('.student-name').value = '';
             el.querySelector('.student-email').value = '';
+            el.querySelector('.student-subgroup').value = '';
           });
         } else {
           alert(data.error || 'Ошибка добавления студентов');

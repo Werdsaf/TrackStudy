@@ -1,8 +1,109 @@
+// routes/attendance.js
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const authenticate = require('../middleware/auth');
 
+// GET /api/attendance/group/:groupId
+router.get('/group/:groupId', authenticate, async (req, res) => {
+  const { groupId } = req.params;
+  const { date_from, date_to, lesson_ids, student_ids } = req.query;
+
+  try {
+    // Получить занятия (с фильтром)
+    let lessonsQuery = 'SELECT id FROM lessons WHERE group_id = $1';
+    const lessonsParams = [groupId];
+
+    if (date_from) {
+      lessonsParams.push(date_from);
+      lessonsQuery += ' AND date >= $' + lessonsParams.length;
+    }
+    if (date_to) {
+      lessonsParams.push(date_to);
+      lessonsQuery += ' AND date <= $' + lessonsParams.length;
+    }
+    if (lesson_ids) {
+      const ids = lesson_ids.split(',').map(Number);
+      lessonsParams.push(ids);
+      lessonsQuery += ' AND id = ANY($' + lessonsParams.length + ')';
+    }
+
+    const lessonsRes = await pool.query(lessonsQuery, lessonsParams);
+    const lessonIds = lessonsRes.rows.map(r => r.id);
+
+    // Получить студентов (с фильтром)
+    let studentsQuery = 'SELECT id FROM students WHERE group_id = $1';
+    const studentsParams = [groupId];
+
+    if (student_ids) {
+      const ids = student_ids.split(',').map(Number);
+      studentsParams.push(ids);
+      studentsQuery += ' AND id = ANY($' + studentsParams.length + ')';
+    }
+
+    const studentsRes = await pool.query(studentsQuery, studentsParams);
+    const studentIds = studentsRes.rows.map(r => r.id);
+
+    // Получить посещаемость для этих занятий и студентов
+    let attendance = [];
+    if (lessonIds.length > 0 && studentIds.length > 0) {
+      const attRes = await pool.query(
+        `SELECT student_id, lesson_id, status, note 
+         FROM attendance 
+         WHERE lesson_id = ANY($1::int[]) AND student_id = ANY($2::int[])`,
+        [lessonIds, studentIds]
+      );
+      attendance = attRes.rows;
+    }
+
+    // Собрать результат в нужном формате: student + lessons[]
+    const result = [];
+    for (const sid of studentIds) {
+      // Получить информацию о студенте
+      const studentRes = await pool.query(
+        'SELECT id, full_name, email, subgroup_name FROM students WHERE id = $1',
+        [sid]
+      );
+      const student = studentRes.rows[0];
+      if (!student) continue;
+
+      // Найти все записи посещаемости для этого студента
+      const studentAtt = attendance.filter(a => a.student_id === sid);
+
+      const lessons = [];
+      for (const lid of lessonIds) {
+        const att = studentAtt.find(a => a.lesson_id === lid);
+        const lessonRes = await pool.query(
+          'SELECT id, date, lesson_num, title, subgroup_name FROM lessons WHERE id = $1',
+          [lid]
+        );
+        const lesson = lessonRes.rows[0];
+        if (!lesson) continue;
+
+        lessons.push({
+          lesson_id: lesson.id,
+          date: lesson.date,
+          lesson_num: lesson.lesson_num,
+          title: lesson.title,
+          status: att?.status || 'Н',
+          note: att?.note || null
+        });
+      }
+
+      result.push({
+        student: student,
+        lessons: lessons
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('[ATTENDANCE GET]', err);
+    res.status(500).json({ error: 'Не удалось загрузить посещаемость' });
+  }
+});
+
+// PUT /api/attendance/:lessonId/students/:studentId
 router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   const { lessonId, studentId } = req.params;
   const { status, note } = req.body;
@@ -27,107 +128,50 @@ router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   }
 });
 
-router.get('/group/:groupId', authenticate, async (req, res) => {
+// GET /api/attendance/export/csv/:groupId
+router.get('/export/csv/:groupId', authenticate, async (req, res) => {
   const { groupId } = req.params;
-  const { date_from, date_to } = req.query;
-
-  let where = 'WHERE s.group_id = $1';
-  const params = [groupId];
-
-  if (date_from) {
-    params.push(date_from);
-    where += ' AND l.date >= $' + params.length;
-  }
-  if (date_to) {
-    params.push(date_to);
-    where += ' AND l.date <= $' + params.length;
-  }
+  const { date_from, date_to, subgroup_name } = req.query;
 
   try {
+    let where = 'WHERE s.group_id = $1';
+    const params = [groupId];
+
+    if (date_from) {
+      params.push(date_from);
+      where += ' AND l.date >= $' + params.length;
+    }
+    if (date_to) {
+      params.push(date_to);
+      where += ' AND l.date <= $' + params.length;
+    }
+    if (subgroup_name) {
+      params.push(subgroup_name);
+      where += ' AND s.subgroup_name = $' + params.length;
+    }
+
     const result = await pool.query(`
       SELECT
-        s.id AS student_id,
         s.full_name,
         s.email,
-        l.id AS lesson_id,
+        s.subgroup_name,
         l.date,
         l.lesson_num,
         l.title,
         COALESCE(a.status, 'Н') AS status,
         a.note
       FROM students s
-      CROSS JOIN lessons l
+      JOIN lessons l ON l.group_id = s.group_id
       LEFT JOIN attendance a ON a.student_id = s.id AND a.lesson_id = l.id
-      WHERE l.group_id = $1
-        ${date_from || date_to ? `AND l.date BETWEEN $2 AND $3` : ''}
+      ${where}
       ORDER BY s.full_name, l.date, l.lesson_num
     `, params);
 
-    // Группируем по студенту
-    const map = {};
-    for (const row of result.rows) {
-      if (!map[row.student_id]) {
-        map[row.student_id] = {
-          student: { id: row.student_id, full_name: row.full_name, email: row.email },
-          lessons: []
-        };
-      }
-      map[row.student_id].lessons.push({
-        lesson_id: row.lesson_id,
-        date: row.date,
-        lesson_num: row.lesson_num,
-        title: row.title,
-        status: row.status,
-        note: row.note
-      });
-    }
-
-    res.json(Object.values(map));
-  } catch (err) {
-    console.error('[ATTENDANCE GET]', err);
-    res.status(500).json({ error: 'Не удалось загрузить посещаемость' });
-  }
-});
-
-// Экспорт в CSV
-router.get('/export/csv/:groupId', authenticate, async (req, res) => {
-  const { groupId } = req.params;
-  const { date_from, date_to } = req.query;
-
-  let where = 'WHERE s.group_id = $1';
-  const params = [groupId];
-
-  if (date_from) {
-    params.push(date_from);
-    where += ' AND l.date >= $' + params.length;
-  }
-  if (date_to) {
-    params.push(date_to);
-    where += ' AND l.date <= $' + params.length;
-  }
-
-  try {
-    const result = await pool.query(`
-      SELECT
-        s.full_name,
-        s.email,
-        l.date,
-        l.lesson_num,
-        l.title,
-        COALEScesso(a.status, 'Н') AS status,
-        a.note
-      FROM students s
-      CROSS JOIN lessons l
-      LEFT JOIN attendance a ON a.student_id = s.id AND a.lesson_id = l.id
-      WHERE l.group_id = $1
-        ${date_from || date_to ? `AND l.date BETWEEN $2 AND $3` : ''}
-      ORDER BY s.full_name, l.date, l.lesson_num
-    `, params);
-
-    const headers = ['ФИО', 'Email', 'Дата', '№ занятия', 'Тема', 'Статус', 'Примечание'];
+    const headers = ['ФИО', 'Email', 'Подгруппа', 'Дата', '№ занятия', 'Тема', 'Статус', 'Примечание'];
     const rows = result.rows.map(r => [
       `"${r.full_name.replace(/"/g, '""')}"`,
       r.email ? `"${r.email.replace(/"/g, '""')}"` : '""',
+      r.subgroup_name ? `"${r.subgroup_name.replace(/"/g, '""')}"` : '""',
       `"${r.date}"`,
       r.lesson_num,
       `"${r.title.replace(/"/g, '""')}"`,
@@ -138,7 +182,7 @@ router.get('/export/csv/:groupId', authenticate, async (req, res) => {
     const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="посещаемость.csv"');
-    res.send('\uFEFF' + csv); // BOM для корректного отображения кириллицы в Excel
+    res.send('\uFEFF' + csv);
   } catch (err) {
     console.error('[ATTENDANCE EXPORT]', err);
     res.status(500).json({ error: 'Ошибка экспорта' });

@@ -1,3 +1,4 @@
+// routes/groups.js
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -6,10 +7,10 @@ const authenticate = require('../middleware/auth');
 // GET /api/groups — список групп
 router.get('/', authenticate, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, name, description, created_at FROM groups ORDER BY created_at DESC');
+    const result = await pool.query('SELECT id, name, description FROM groups ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) {
-    console.error('[GROUPS GET]', err);
+    console.error('[GET GROUPS]', err);
     res.status(500).json({ error: 'Не удалось загрузить группы' });
   }
 });
@@ -23,12 +24,12 @@ router.post('/', authenticate, async (req, res) => {
 
   try {
     const result = await pool.query(
-      'INSERT INTO groups (name, description, created_by) VALUES ($1, $2, $3) RETURNING id, name, description, created_at',
+      'INSERT INTO groups (name, description, created_by) VALUES ($1, $2, $3) RETURNING id, name, description',
       [name.trim(), description?.trim() || null, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error('[GROUPS POST]', err);
+    console.error('[POST GROUP]', err);
     res.status(500).json({ error: 'Не удалось создать группу' });
   }
 });
@@ -42,48 +43,47 @@ router.post('/:groupId/students', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'Тело запроса должно быть массивом студентов' });
   }
 
-  // Проверим, существует ли группа
   try {
     const groupRes = await pool.query('SELECT id FROM groups WHERE id = $1', [groupId]);
     if (groupRes.rows.length === 0) {
       return res.status(404).json({ error: `Группа с ID=${groupId} не найдена` });
     }
 
-    const added = [];
     for (const s of students) {
       const fullName = s.full_name?.trim();
-      if (!fullName) continue; // пропускаем пустые ФИО
+      if (!fullName) continue;
 
-      const result = await pool.query(
-        'INSERT INTO students (full_name, email, group_id) VALUES ($1, $2, $3) RETURNING id, full_name, email',
-        [fullName, s.email?.trim() || null, parseInt(groupId)]
+      await pool.query(
+        'INSERT INTO students (full_name, email, group_id, subgroup_name) VALUES ($1, $2, $3, $4)',
+        [
+          fullName,
+          s.email?.trim() || null,
+          parseInt(groupId),
+          s.subgroup_name?.trim() || null
+        ]
       );
-      added.push(result.rows[0]);
     }
 
-    res.status(201).json({
-      message: `Добавлено ${added.length} студентов`,
-      students: added
-    });
+    res.status(201).json({ message: `Добавлено ${students.length} студентов` });
   } catch (err) {
-    console.error('[GROUPS ADD STUDENTS]', err);
+    console.error('[ADD STUDENTS]', err);
     res.status(500).json({ error: 'Ошибка добавления студентов' });
   }
 });
 
-// GET /api/groups/:groupId/students — студенты группы
+// GET /api/groups/:groupId/students
 router.get('/:groupId/students', authenticate, async (req, res) => {
   const { groupId } = req.params;
   try {
     const result = await pool.query(
-      'SELECT id, full_name, email FROM students WHERE group_id = $1 ORDER BY full_name',
+      'SELECT id, full_name, email, subgroup_name FROM students WHERE group_id = $1 ORDER BY subgroup_name NULLS LAST, full_name',
       [groupId]
     );
     res.json(result.rows);
   } catch (err) {
-    console.error('[GROUPS STUDENTS]', err);
+    console.error('[GET STUDENTS]', err);
     res.status(500).json({ error: 'Не удалось загрузить студентов' });
   }
 });
 
-module.exports = router;
+module.exports = router; // ← ЭТА СТРОКА ОБЯЗАТЕЛЬНА!

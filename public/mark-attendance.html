@@ -67,7 +67,7 @@
         </div>
         <div class="form-group">
           <label>Подгруппа (опц.)</label>
-          <input type="text" id="modal-subgroups" placeholder="ID студентов через запятую: 1,3,5">
+          <input type="text" id="modal-subgroups" placeholder="Напр. 1, А, Б">
           <p style="font-size:0.85rem; color:#6b7280;">Оставьте пустым — занятие для всей группы</p>
         </div>
         <div style="display:flex; gap:0.5rem; margin-top:1rem;">
@@ -103,11 +103,11 @@
         });
       } catch (err) {
         console.error('Ошибка загрузки групп:', err);
-        alert('Не удалось загрузить группы. Проверьте подключение к серверу.');
+        alert('Не удалось загрузить группы.');
       }
     }
 
-    // Загрузить занятия по группе и дате
+    // Загрузить занятия
     async function loadLessons() {
       const groupId = document.getElementById('group-select').value;
       const date = document.getElementById('date-picker').value;
@@ -135,7 +135,8 @@
         lessons.forEach(l => {
           const opt = document.createElement('option');
           opt.value = l.id;
-          opt.textContent = `№${l.lesson_num}: ${l.title} (${l.date})`;
+          const sub = l.subgroup_name ? ` [${l.subgroup_name}]` : '';
+          opt.textContent = `№${l.lesson_num}: ${l.title}${sub} (${l.date})`;
           lessonSel.appendChild(opt);
         });
         lessonSel.disabled = false;
@@ -149,7 +150,6 @@
     // Открыть модалку
     function openCreateLessonModal() {
       document.getElementById('lesson-modal').style.display = 'block';
-      // Подставить текущую дату и ID группы (если есть)
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('modal-date').value = today;
       const groupId = document.getElementById('group-select').value;
@@ -166,22 +166,11 @@
       const num = document.getElementById('modal-lesson-num').value;
       const title = document.getElementById('modal-title').value.trim();
       const groupId = document.getElementById('modal-group-id').value;
-      const subgroupsStr = document.getElementById('modal-subgroups').value.trim();
+      const subgroupName = document.getElementById('modal-subgroups').value.trim();
 
       if (!date || !num || !title || !groupId) {
         alert('Заполните все обязательные поля');
         return;
-      }
-
-      let subgroups = null;
-      if (subgroupsStr) {
-        try {
-          subgroups = subgroupsStr.split(',').map(id => parseInt(id.trim()).toString()).filter(id => id);
-          if (subgroups.length === 0) subgroups = null;
-        } catch (e) {
-          alert('Некорректный формат подгруппы (должны быть числа через запятую)');
-          return;
-        }
       }
 
       try {
@@ -196,7 +185,7 @@
             lesson_num: parseInt(num),
             title,
             group_id: parseInt(groupId),
-            subgroups: subgroups
+            subgroup_name: subgroupName || null
           })
         });
 
@@ -204,7 +193,7 @@
         if (res.ok) {
           alert(`✅ Занятие "${title}" создано!`);
           closeModal();
-          loadLessons(); // обновляем список занятий
+          loadLessons();
         } else {
           alert(data.error || 'Ошибка создания занятия');
         }
@@ -224,24 +213,37 @@
       }
       currentLessonId = lessonId;
 
-      const groupId = document.getElementById('group-select').value;
       try {
-        const res = await fetch(`/api/attendance/group/${groupId}`, {
+        // Сначала получаем занятие, чтобы узнать subgroup_name
+        const lessonRes = await fetch(`/api/lessons?id=${lessonId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const data = await res.json();
+        const lesson = (await lessonRes.json())[0]; // массив из 1 элемента
+
+        // Получаем всех студентов группы
+        const groupId = document.getElementById('group-select').value;
+        const studentsRes = await fetch(`/api/groups/${groupId}/students`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const allStudents = await studentsRes.json();
+
+        // Фильтруем: если у занятия subgroup_name — показываем только тех, у кого subgroup_name совпадает
+        const filteredStudents = lesson.subgroup_name
+          ? allStudents.filter(s => s.subgroup_name === lesson.subgroup_name)
+          : allStudents;
 
         const grid = document.getElementById('attendance-grid');
         grid.innerHTML = '';
-        data.forEach(student => {
-          const lesson = student.lessons.find(l => l.lesson_id == lessonId);
-          const status = lesson?.status || 'Н';
+        filteredStudents.forEach(student => {
+          const lessonData = student.lessons ? student.lessons.find(l => l.lesson_id == lessonId) : null;
+          const status = lessonData?.status || 'Н';
 
           const card = document.createElement('div');
           card.className = 'student-card';
+          const subgroupText = student.subgroup_name ? ` (${student.subgroup_name})` : '';
           card.innerHTML = `
-            <div class="student-name">${student.student.full_name}</div>
-            <select class="status-select" data-student-id="${student.student.id}">
+            <div class="student-name">${student.full_name}${subgroupText}</div>
+            <select class="status-select" data-student-id="${student.id}">
               <option value="Н" ${status==='Н'?'selected':''}>Н — Не отмечено</option>
               <option value="П" ${status==='П'?'selected':''}>П — Присутствовал</option>
               <option value="Б" ${status==='Б'?'selected':''}>Б — Болел</option>
@@ -251,6 +253,10 @@
           `;
           grid.appendChild(card);
         });
+
+        if (filteredStudents.length === 0) {
+          grid.innerHTML = `<div style="text-align:center; padding:2rem; color:#6b7280;">Нет студентов в этой подгруппе.</div>`;
+        }
       } catch (err) {
         console.error('Ошибка загрузки студентов:', err);
         alert('Не удалось загрузить студентов');
@@ -279,7 +285,7 @@
           });
         } catch (err) {
           console.error(`Ошибка для студента ${sid}:`, err);
-          alert(`Ошибка сохранения для студента ${sid}. Проверьте соединение.`);
+          alert(`Ошибка сохранения для студента ${sid}.`);
           return;
         }
       }

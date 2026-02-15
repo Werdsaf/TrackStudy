@@ -17,147 +17,268 @@
       </div>
     </header>
 
-    <h2>Посещаемость группы</h2>
+    <main>
+      <h2>Посещаемость группы</h2>
 
-    <div class="form-group">
-      <label>Группа</label>
-      <select id="group-select" onchange="loadStats()"></select>
-    </div>
-    <div class="form-group">
-      <label>Период</label>
-      <select id="period-select">
-        <option value="day">День</option>
-        <option value="week">Неделя</option>
-        <option value="month">Месяц</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Дата начала</label>
-      <input type="date" id="date-from">
-    </div>
-    <div class="form-group">
-      <label>Дата окончания</label>
-      <input type="date" id="date-to">
-    </div>
-    <button type="button" class="btn" onclick="loadAttendance()">Загрузить</button>
-    <button type="button" class="btn btn-outline" onclick="exportCSV()">Экспорт CSV</button>
+      <div class="form-group">
+        <label>Группа</label>
+        <select id="group-select" onchange="loadStats(); loadAttendance();"></select>
+      </div>
+      <div class="form-group">
+        <label>Фильтр по подгруппе (опц.)</label>
+        <input type="text" id="subgroup-filter" placeholder="Напр. 1, А, Б" oninput="loadAttendance()">
+      </div>
+      <div class="form-group">
+        <label>Период</label>
+        <select id="period-select" onchange="loadAttendance()">
+          <option value="day">День</option>
+          <option value="week">Неделя</option>
+          <option value="month">Месяц</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Дата начала</label>
+        <input type="date" id="date-from" onchange="loadAttendance()">
+      </div>
+      <div class="form-group">
+        <label>Дата окончания</label>
+        <input type="date" id="date-to" onchange="loadAttendance()">
+      </div>
+      <button type="button" class="btn btn-outline" onclick="exportCSV()">Экспорт CSV</button>
 
-    <div class="stats-grid" id="stats"></div>
+      <div class="stats-grid" id="stats"></div>
 
-    <div class="table-responsive">
-      <table class="calendar-table" id="attendance-table">
-        <thead>
-          <tr>
-            <th>Студент</th>
-            <!-- динамически -->
-          </tr>
-        </thead>
-        <tbody id="attendance-body"></tbody>
-      </table>
-    </div>
+      <div class="table-responsive">
+        <table class="calendar-table" id="attendance-table">
+          <thead>
+            <tr>
+              <th>Студент</th>
+              <!-- динамически -->
+            </tr>
+          </thead>
+          <tbody id="attendance-body"></tbody>
+        </table>
+      </div>
+    </main>
   </div>
 
   <script>
     const token = localStorage.getItem('token');
-    if (!token) window.location.href = 'index.html';
-
-    let currentGroupId = null;
-    let lessonsMap = {};
-
-    async function loadGroups() {
-      const res = await fetch('/api/groups', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const groups = await res.json();
-      const sel = document.getElementById('group-select');
-      groups.forEach(g => {
-        const opt = document.createElement('option');
-        opt.value = g.id;
-        opt.textContent = g.name;
-        sel.appendChild(opt);
-      });
+    if (!token) {
+      alert('Сначала войдите в систему.');
+      window.location.href = 'index.html';
+      exit;
     }
 
+    let currentGroupId = null;
+
+    // Загрузить группы
+    async function loadGroups() {
+      try {
+        const res = await fetch('/api/groups', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const groups = await res.json();
+        const sel = document.getElementById('group-select');
+        sel.innerHTML = '<option value="">Выберите группу</option>';
+        groups.forEach(g => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = `${g.name} (${g.id})`;
+          sel.appendChild(opt);
+        });
+      } catch (err) {
+        console.error('Ошибка загрузки групп:', err);
+        alert('Не удалось загрузить группы.');
+      }
+    }
+
+    // Загрузить статистику
     async function loadStats() {
       const gid = document.getElementById('group-select').value;
       if (!gid) return;
-      currentGroupId = gid;
 
-      const res = await fetch(`/api/stats/group/${gid}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const stats = await res.json();
-      const container = document.getElementById('stats');
-      container.innerHTML = `
-        <div class="stat-card stat-present">
-          <div>Всего студентов</div>
-          <div class="stat-value">${stats.total_students}</div>
-        </div>
-        <div class="stat-card stat-present">
-          <div>Присутствовали</div>
-          <div class="stat-value">${stats.present}</div>
-        </div>
-        <div class="stat-card stat-absent">
-          <div>Отсутствовали</div>
-          <div class="stat-value">${stats.absent}</div>
-        </div>
-        <div class="stat-card stat-lesson">
-          <div>Пара №</div>
-          <div class="stat-value">3</div>
-        </div>
-      `;
+      try {
+        const res = await fetch(`/api/stats/group/${gid}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const stats = await res.json();
+
+        const container = document.getElementById('stats');
+        container.innerHTML = `
+          <div class="stat-card stat-present">
+            <div>Всего студентов</div>
+            <div class="stat-value">${stats.total_students}</div>
+          </div>
+          <div class="stat-card stat-present">
+            <div>Присутствовали</div>
+            <div class="stat-value">${stats.present}</div>
+          </div>
+          <div class="stat-card stat-absent">
+            <div>Отсутствовали</div>
+            <div class="stat-value">${stats.absent}</div>
+          </div>
+        `;
+      } catch (err) {
+        console.error('Ошибка загрузки статистики:', err);
+      }
     }
 
+    // Загрузить посещаемость
     async function loadAttendance() {
       const gid = document.getElementById('group-select').value;
+      if (!gid) {
+        alert('Выберите группу');
+        return;
+      }
+      currentGroupId = gid;
+
       const from = document.getElementById('date-from').value;
       const to = document.getElementById('date-to').value;
+      const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
 
-      if (!gid) return alert('Выберите группу');
+      try {
+        // 1. Получить занятия группы (с фильтром по подгруппе)
+        let lessonsUrl = `/api/lessons?group_id=${gid}`;
+        const params = new URLSearchParams();
+        if (from) params.append('date_from', from);
+        if (to) params.append('date_to', to);
+        if (subgroupFilter) params.append('subgroup_name', subgroupFilter);
+        if (params.toString()) lessonsUrl += '&' + params.toString();
 
-      const res = await fetch(`/api/attendance/group/${gid}?date_from=${from}&date_to=${to}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-
-      // Собираем все уникальные даты/занятия
-      const allLessons = new Set();
-      data.forEach(s => s.lessons.forEach(l => allLessons.add(`${l.date}|${l.lesson_num}|${l.title}`)));
-      const lessonKeys = Array.from(allLessons).sort();
-
-      // Заголовки
-      const thead = document.querySelector('#attendance-table thead tr');
-      thead.innerHTML = '<th>Студент</th>';
-      lessonKeys.forEach(key => {
-        const [date, num, title] = key.split('|');
-        thead.innerHTML += `<th class="date-header">${date}<br><small>№${num}</small></th>`;
-      });
-
-      // Тело
-      const tbody = document.getElementById('attendance-body');
-      tbody.innerHTML = '';
-      data.forEach(student => {
-        let row = `<tr><td>${student.student.full_name}</td>`;
-        lessonKeys.forEach(key => {
-          const lesson = student.lessons.find(l => 
-            `${l.date}|${l.lesson_num}|${l.title}` === key
-          );
-          const status = lesson?.status || 'Н';
-          row += `<td><span class="status-badge status-${status}">${status}</span></td>`;
+        const lessonsRes = await fetch(lessonsUrl, {
+          headers: { 'Authorization': `Bearer ${token}` }
         });
-        row += '</tr>';
-        tbody.innerHTML += row;
-      });
+        const lessons = await lessonsRes.json();
+
+        if (!Array.isArray(lessons)) {
+          console.error('Ожидался массив занятий, получено:', lessons);
+          document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет занятий для этой подгруппы.</td></tr>';
+          return;
+        }
+
+        // 2. Получить студентов группы (с фильтром по подгруппе)
+        let studentsUrl = `/api/groups/${gid}/students`;
+        if (subgroupFilter) {
+          studentsUrl += `?subgroup_name=${encodeURIComponent(subgroupFilter)}`;
+        }
+        const studentsRes = await fetch(studentsUrl, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const students = await studentsRes.json();
+
+        if (!Array.isArray(students)) {
+          console.error('Ожидался массив студентов, получено:', students);
+          document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+          return;
+        }
+
+        // 3. Получить посещаемость для этих студентов и занятий
+        const lessonIds = lessons.map(l => l.id);
+        const studentIds = students.map(s => s.id);
+
+        let attUrl = `/api/attendance/group/${gid}`;
+        const attParams = new URLSearchParams();
+        if (from) attParams.append('date_from', from);
+        if (to) attParams.append('date_to', to);
+        if (lessonIds.length > 0) attParams.append('lesson_ids', lessonIds.join(','));
+        if (studentIds.length > 0) attParams.append('student_ids', studentIds.join(','));
+        if (attParams.toString()) attUrl += '?' + attParams.toString();
+
+        const attRes = await fetch(attUrl, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const attendanceData = await attRes.json();
+
+        // 4. Собрать данные: для каждого студента — его занятия
+        const result = [];
+        for (const student of students) {
+          const attRecord = attendanceData.find(r => r.student.id === student.id);
+          const studentLessons = [];
+
+          for (const lesson of lessons) {
+            if (attRecord && attRecord.lessons) {
+              const lessonData = attRecord.lessons.find(l => l.lesson_id === lesson.id);
+              studentLessons.push({
+                lesson_id: lesson.id,
+                date: lesson.date,
+                lesson_num: lesson.lesson_num,
+                title: lesson.title,
+                status: lessonData?.status || 'Н',
+                note: lessonData?.note || null
+              });
+            } else {
+              // Если нет данных — создаём пустую запись
+              studentLessons.push({
+                lesson_id: lesson.id,
+                date: lesson.date,
+                lesson_num: lesson.lesson_num,
+                title: lesson.title,
+                status: 'Н',
+                note: null
+              });
+            }
+          }
+
+          result.push({
+            student: student,
+            lessons: studentLessons
+          });
+        }
+
+        // 5. Генерация таблицы
+        const thead = document.querySelector('#attendance-table thead tr');
+        thead.innerHTML = '<th>Студент</th>';
+        lessons.forEach(lesson => {
+          const sub = lesson.subgroup_name ? ` [${lesson.subgroup_name}]` : '';
+          thead.innerHTML += `<th class="date-header">${lesson.date}<br><small>№${lesson.lesson_num}${sub}</small></th>`;
+        });
+
+        const tbody = document.getElementById('attendance-body');
+        tbody.innerHTML = '';
+        if (result.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+          return;
+        }
+
+        result.forEach(item => {
+          const { student, lessons: studentLessons } = item;
+          const subgroupText = student.subgroup_name ? ` (${student.subgroup_name})` : '';
+          let row = `<tr><td>${student.full_name}${subgroupText}</td>`;
+          lessons.forEach(lesson => {
+            const l = studentLessons.find(it => it.lesson_id === lesson.id);
+            const status = l?.status || 'Н';
+            row += `<td><span class="status-badge status-${status}">${status}</span></td>`;
+          });
+          row += '</tr>';
+          tbody.innerHTML += row;
+        });
+
+      } catch (err) {
+        console.error('Ошибка загрузки посещаемости:', err);
+        document.getElementById('attendance-body').innerHTML = `<tr><td colspan="100" style="text-align:center; color:#f87171; padding:2rem;">Ошибка: ${err.message}</td></tr>`;
+      }
     }
 
+    // Экспорт CSV
     async function exportCSV() {
       const gid = document.getElementById('group-select').value;
+      if (!gid) {
+        alert('Выберите группу');
+        return;
+      }
+
       const from = document.getElementById('date-from').value;
       const to = document.getElementById('date-to').value;
+      const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
 
-      if (!gid) return alert('Выберите группу');
+      let url = `/api/attendance/export/csv/${gid}`;
+      const params = new URLSearchParams();
+      if (from) params.append('date_from', from);
+      if (to) params.append('date_to', to);
+      if (subgroupFilter) params.append('subgroup_name', subgroupFilter);
+      if (params.toString()) url += '?' + params.toString();
 
-      const url = `/api/attendance/export/csv/${gid}${from ? `?date_from=${from}` : ''}${to ? (from ? `&date_to=${to}` : `?date_to=${to}`) : ''}`;
       window.open(url, '_blank');
     }
 
@@ -166,6 +287,7 @@
       window.location.href = 'index.html';
     }
 
+    // Инициализация
     loadGroups();
   </script>
 </body>
