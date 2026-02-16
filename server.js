@@ -18,14 +18,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// 🔥 ВАЖНО: API-роуты ДО статики!
+//API-роуты
 app.use('/api/auth', authRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/lessons', lessonsRoutes);
 app.use('/api/attendance', attendanceRoutes);
-app.use('/api/stats', statsRoutes);
+app.use('/api/stats', statsRoutes);ы
 
-// Статика — только ПОСЛЕ всех /api/*
+// Статика
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Fallback: если ничего не совпало — отдаем index.html (для SPA, но у вас не SPA — можно убрать, если нужно)

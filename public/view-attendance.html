@@ -22,19 +22,11 @@
 
       <div class="form-group">
         <label>Группа</label>
-        <select id="group-select" onchange="loadStats(); loadAttendance();"></select>
+        <select id="group-select" onchange="loadAttendance();"></select>
       </div>
       <div class="form-group">
         <label>Фильтр по подгруппе (опц.)</label>
         <input type="text" id="subgroup-filter" placeholder="Напр. 1, А, Б" oninput="loadAttendance()">
-      </div>
-      <div class="form-group">
-        <label>Период</label>
-        <select id="period-select" onchange="loadAttendance()">
-          <option value="day">День</option>
-          <option value="week">Неделя</option>
-          <option value="month">Месяц</option>
-        </select>
       </div>
       <div class="form-group">
         <label>Дата начала</label>
@@ -46,18 +38,38 @@
       </div>
       <button type="button" class="btn btn-outline" onclick="exportCSV()">Экспорт CSV</button>
 
-      <div class="stats-grid" id="stats"></div>
+      <div style="display: flex; gap: 2rem;">
+        <div class="table-responsive" style="flex-grow: 1;">
+          <table class="calendar-table" id="attendance-table">
+            <thead>
+              <tr>
+                <th>Студент</th>
+                <!-- динамически -->
+              </tr>
+            </thead>
+            <tbody id="attendance-body"></tbody>
+          </table>
+        </div>
 
-      <div class="table-responsive">
-        <table class="calendar-table" id="attendance-table">
-          <thead>
-            <tr>
-              <th>Студент</th>
-              <!-- динамически -->
-            </tr>
-          </thead>
-          <tbody id="attendance-body"></tbody>
-        </table>
+        <!-- Итоговая статистика справа -->
+        <div id="summary-stats" style="
+          min-width: 200px;
+          padding: 1rem;
+          background: #f8fafc;
+          border-radius: 8px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+          font-size: 0.9rem;
+          color: #374151;
+        ">
+          <h4>Итого по таблице</h4>
+          <div id="summary-content">
+            <p>Присутствовало: <span id="present-count">0</span></p>
+            <p>Уважительно: <span id="up-count">0</span></p>
+            <p>Неуважительно: <span id="np-count">0</span></p>
+            <p>Болел: <span id="b-count">0</span></p>
+            <p><strong>Всего отсутствовали: <span id="total-absent">0</span></strong></p>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -93,42 +105,12 @@
       }
     }
 
-    // Загрузить статистику
-    async function loadStats() {
-      const gid = document.getElementById('group-select').value;
-      if (!gid) return;
-
-      try {
-        const res = await fetch(`/api/stats/group/${gid}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const stats = await res.json();
-
-        const container = document.getElementById('stats');
-        container.innerHTML = `
-          <div class="stat-card stat-present">
-            <div>Всего студентов</div>
-            <div class="stat-value">${stats.total_students}</div>
-          </div>
-          <div class="stat-card stat-present">
-            <div>Присутствовали</div>
-            <div class="stat-value">${stats.present}</div>
-          </div>
-          <div class="stat-card stat-absent">
-            <div>Отсутствовали</div>
-            <div class="stat-value">${stats.absent}</div>
-          </div>
-        `;
-      } catch (err) {
-        console.error('Ошибка загрузки статистики:', err);
-      }
-    }
-
     // Загрузить посещаемость
     async function loadAttendance() {
       const gid = document.getElementById('group-select').value;
       if (!gid) {
-        alert('Выберите группу');
+        document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Выберите группу</td></tr>';
+        updateSummaryStats(0, 0, 0, 0);
         return;
       }
       currentGroupId = gid;
@@ -138,7 +120,7 @@
       const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
 
       try {
-        // 1. Получить занятия группы (с фильтром по подгруппе)
+        // 1. Получить занятия
         let lessonsUrl = `/api/lessons?group_id=${gid}`;
         const params = new URLSearchParams();
         if (from) params.append('date_from', from);
@@ -154,10 +136,11 @@
         if (!Array.isArray(lessons)) {
           console.error('Ожидался массив занятий, получено:', lessons);
           document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет занятий для этой подгруппы.</td></tr>';
+          updateSummaryStats(0, 0, 0, 0);
           return;
         }
 
-        // 2. Получить студентов группы (с фильтром по подгруппе)
+        // 2. Получить студентов (с фильтром по подгруппе)
         let studentsUrl = `/api/groups/${gid}/students`;
         if (subgroupFilter) {
           studentsUrl += `?subgroup_name=${encodeURIComponent(subgroupFilter)}`;
@@ -170,10 +153,11 @@
         if (!Array.isArray(students)) {
           console.error('Ожидался массив студентов, получено:', students);
           document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+          updateSummaryStats(0, 0, 0, 0);
           return;
         }
 
-        // 3. Получить посещаемость для этих студентов и занятий
+        // 3. Получить посещаемость
         const lessonIds = lessons.map(l => l.id);
         const studentIds = students.map(s => s.id);
 
@@ -190,7 +174,12 @@
         });
         const attendanceData = await attRes.json();
 
-        // 4. Собрать данные: для каждого студента — его занятия
+        // 4. Собрать данные и посчитать статусы
+        let presentTotal = 0;
+        let upTotal = 0;
+        let npTotal = 0;
+        let bTotal = 0;
+
         const result = [];
         for (const student of students) {
           const attRecord = attendanceData.find(r => r.student.id === student.id);
@@ -199,22 +188,30 @@
           for (const lesson of lessons) {
             if (attRecord && attRecord.lessons) {
               const lessonData = attRecord.lessons.find(l => l.lesson_id === lesson.id);
+              const status = lessonData?.status || 'Н';
+
+              // Счётчики
+              if (status === 'П') presentTotal++;
+              else if (status === 'УП') upTotal++;
+              else if (status === 'НП') npTotal++;
+              else if (status === 'Б') bTotal++;
+
               studentLessons.push({
                 lesson_id: lesson.id,
                 date: lesson.date,
                 lesson_num: lesson.lesson_num,
                 title: lesson.title,
-                status: lessonData?.status || 'Н',
+                status: status,
                 note: lessonData?.note || null
               });
             } else {
-              // Если нет данных — создаём пустую запись
+              const status = 'Н';
               studentLessons.push({
                 lesson_id: lesson.id,
                 date: lesson.date,
                 lesson_num: lesson.lesson_num,
                 title: lesson.title,
-                status: 'Н',
+                status: status,
                 note: null
               });
             }
@@ -238,6 +235,7 @@
         tbody.innerHTML = '';
         if (result.length === 0) {
           tbody.innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+          updateSummaryStats(0, 0, 0, 0);
           return;
         }
 
@@ -254,10 +252,23 @@
           tbody.innerHTML += row;
         });
 
+        // ✅ Обновляем итоговую статистику
+        updateSummaryStats(presentTotal, upTotal, npTotal, bTotal);
+
       } catch (err) {
         console.error('Ошибка загрузки посещаемости:', err);
         document.getElementById('attendance-body').innerHTML = `<tr><td colspan="100" style="text-align:center; color:#f87171; padding:2rem;">Ошибка: ${err.message}</td></tr>`;
+        updateSummaryStats(0, 0, 0, 0);
       }
+    }
+
+    // Обновить итоговую статистику справа
+    function updateSummaryStats(present, up, np, b) {
+      document.getElementById('present-count').textContent = present;
+      document.getElementById('up-count').textContent = up;
+      document.getElementById('np-count').textContent = np;
+      document.getElementById('b-count').textContent = b;
+      document.getElementById('total-absent').textContent = up + np + b;
     }
 
     // Экспорт CSV
