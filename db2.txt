@@ -20,17 +20,17 @@ CREATE TABLE students (
   full_name VARCHAR(255) NOT NULL,
   email VARCHAR(255),
   group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  subgroup_name VARCHAR(50),  -- ← Подгруппа студента
+  subgroup_id INT,  -- ← ТОЛЬКО INTEGER
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE lessons (
   id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
+  date DATE NOT NULL,  -- ← ТОЛЬКО DATE (без времени!)
   lesson_num SMALLINT NOT NULL,
   title VARCHAR(100) NOT NULL,
   group_id INT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  subgroup_name VARCHAR(50),  -- ← Подгруппа занятия (если задана)
+  subgroup_id INT,  -- ← ТОЛЬКО INTEGER
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -48,5 +48,5 @@ CREATE TABLE attendance (
 CREATE INDEX idx_lessons_group_date ON lessons (group_id, date);
 CREATE INDEX idx_attendance_lesson ON attendance (lesson_id);
 CREATE INDEX idx_attendance_student ON attendance (student_id);
-CREATE INDEX idx_students_group_subgroup ON students (group_id, subgroup_name);
-CREATE INDEX idx_lessons_group_subgroup ON lessons (group_id, subgroup_name);
+CREATE INDEX idx_students_group_subgroup ON students (group_id, subgroup_id);
+CREATE INDEX idx_lessons_group_subgroup ON lessons (group_id, subgroup_id);

@@ -23,7 +23,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/lessons', lessonsRoutes);
 app.use('/api/attendance', attendanceRoutes);
-app.use('/api/stats', statsRoutes);ы
+app.use('/api/stats', statsRoutes);
 
 // Статика
 app.use(express.static(path.join(__dirname, 'public')));

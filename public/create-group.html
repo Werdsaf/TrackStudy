@@ -8,7 +8,7 @@
 <body>
   <div class="container">
     <header>
-      <div class="logo">Мониторинг студентов</div>
+      <div class="logo">TrackStudy</div>
       <div class="nav-links">
         <a href="create-group.html" class="active">Группы</a>
         <a href="mark-attendance.html">Отметка</a>
@@ -35,13 +35,13 @@
 
       <h2>Добавить студентов в группу</h2>
       <p style="color: #6b7280; margin-bottom: 1rem;">
-        🔹 Введите <strong>ID группы</strong> (см. список ниже)<br>
+        🔹 Введите <strong>ID группы**</strong> (см. список ниже)<br>
         🔹 Email — не обязателен<br>
-        🔹 Подгруппа — не обязательна (можно оставить пустой)
+        🔹 Подгруппа — число (напр. <code>1</code>, <code>2</code>)
       </p>
 
       <div class="form-group">
-        <label>ID группы</label>
+        <label>ID группы**</label>
         <input type="number" id="group-id" placeholder="Напр. 3" required>
       </div>
 
@@ -49,7 +49,7 @@
         <div class="student-input">
           <input type="text" placeholder="ФИО студента" class="student-name" required>
           <input type="email" placeholder="Email (не обязательно)" class="student-email">
-          <input type="text" placeholder="Подгруппа ()" class="student-subgroup">
+          <input type="number" placeholder="Подгруппа (число)" class="student-subgroup">
           <button type="button" class="btn btn-outline" onclick="addStudentInput()">+</button>
         </div>
       </div>
@@ -63,6 +63,10 @@
         </ul>
       </div>
     </main>
+
+    <footer>
+      <p>© 2026 Мелков Алексей • ИСиП-23</p>
+    </footer>
   </div>
 
   <script>
@@ -139,7 +143,7 @@
       div.innerHTML = `
         <input type="text" placeholder="ФИО студента" class="student-name" required>
         <input type="email" placeholder="Email (не обязательно)" class="student-email">
-        <input type="text" placeholder="Подгруппа (напр. 3, А)" class="student-subgroup">
+        <input type="number" placeholder="Подгруппа (число)" class="student-subgroup">
         <button type="button" class="btn btn-outline" onclick="removeStudentInput(this)">×</button>
       `;
       document.getElementById('students-list').appendChild(div);
@@ -167,7 +171,7 @@
           students.push({
             full_name: name,
             email: email || null,
-            subgroup_name: subgroup || null
+            subgroup_id: subgroup ? parseInt(subgroup) : null  // ← ТОЛЬКО ЧИСЛО
           });
         }
       });
@@ -200,7 +204,7 @@
           alert(data.error || 'Ошибка добавления студентов');
         }
       } catch (err) {
-        console.error(err);
+        console.error('Ошибка сохранения:', err);
         alert('Ошибка сети при отправке данных');
       }
     }

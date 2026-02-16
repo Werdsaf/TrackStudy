@@ -4,13 +4,13 @@ const router = express.Router();
 const pool = require('../db');
 const authenticate = require('../middleware/auth');
 
-// GET /api/attendance/group/:groupId
+// GET /attendance/group/:groupId
 router.get('/group/:groupId', authenticate, async (req, res) => {
   const { groupId } = req.params;
   const { date_from, date_to, lesson_ids, student_ids } = req.query;
 
   try {
-    // Получить занятия (с фильтром)
+    // Получить занятия
     let lessonsQuery = 'SELECT id FROM lessons WHERE group_id = $1';
     const lessonsParams = [groupId];
 
@@ -31,7 +31,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
     const lessonsRes = await pool.query(lessonsQuery, lessonsParams);
     const lessonIds = lessonsRes.rows.map(r => r.id);
 
-    // Получить студентов (с фильтром)
+    // Получить студентов
     let studentsQuery = 'SELECT id FROM students WHERE group_id = $1';
     const studentsParams = [groupId];
 
@@ -44,7 +44,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
     const studentsRes = await pool.query(studentsQuery, studentsParams);
     const studentIds = studentsRes.rows.map(r => r.id);
 
-    // Получить посещаемость для этих занятий и студентов
+    // Получить посещаемость
     let attendance = [];
     if (lessonIds.length > 0 && studentIds.length > 0) {
       const attRes = await pool.query(
@@ -56,31 +56,27 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
       attendance = attRes.rows;
     }
 
-    // Собрать результат в нужном формате: student + lessons[]
+    // Собрать результат: [{ student, lessons: [...] }]
     const result = [];
     for (const sid of studentIds) {
-      // Получить информацию о студенте
       const studentRes = await pool.query(
-        'SELECT id, full_name, email, subgroup_name FROM students WHERE id = $1',
+        'SELECT id, full_name, email, subgroup_id FROM students WHERE id = $1',
         [sid]
       );
       const student = studentRes.rows[0];
       if (!student) continue;
 
-      // Найти все записи посещаемости для этого студента
-      const studentAtt = attendance.filter(a => a.student_id === sid);
-
-      const lessons = [];
+      const studentLessons = [];
       for (const lid of lessonIds) {
-        const att = studentAtt.find(a => a.lesson_id === lid);
+        const att = attendance.find(a => a.student_id === sid && a.lesson_id === lid);
         const lessonRes = await pool.query(
-          'SELECT id, date, lesson_num, title, subgroup_name FROM lessons WHERE id = $1',
+          'SELECT id, date, lesson_num, title, subgroup_id FROM lessons WHERE id = $1',
           [lid]
         );
         const lesson = lessonRes.rows[0];
         if (!lesson) continue;
 
-        lessons.push({
+        studentLessons.push({
           lesson_id: lesson.id,
           date: lesson.date,
           lesson_num: lesson.lesson_num,
@@ -92,7 +88,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
 
       result.push({
         student: student,
-        lessons: lessons
+        lessons: studentLessons
       });
     }
 
@@ -103,7 +99,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
   }
 });
 
-// PUT /api/attendance/:lessonId/students/:studentId
+// PUT /attendance/:lessonId/students/:studentId
 router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   const { lessonId, studentId } = req.params;
   const { status, note } = req.body;
@@ -128,10 +124,10 @@ router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/attendance/export/csv/:groupId
+// GET /attendance/export/csv/:groupId
 router.get('/export/csv/:groupId', authenticate, async (req, res) => {
   const { groupId } = req.params;
-  const { date_from, date_to, subgroup_name } = req.query;
+  const { date_from, date_to, subgroup_id } = req.query;
 
   try {
     let where = 'WHERE s.group_id = $1';
@@ -145,16 +141,16 @@ router.get('/export/csv/:groupId', authenticate, async (req, res) => {
       params.push(date_to);
       where += ' AND l.date <= $' + params.length;
     }
-    if (subgroup_name) {
-      params.push(subgroup_name);
-      where += ' AND s.subgroup_name = $' + params.length;
+    if (subgroup_id !== undefined) {
+      params.push(parseInt(subgroup_id));
+      where += ' AND s.subgroup_id = $' + params.length;
     }
 
     const result = await pool.query(`
       SELECT
         s.full_name,
         s.email,
-        s.subgroup_name,
+        s.subgroup_id,
         l.date,
         l.lesson_num,
         l.title,
@@ -171,7 +167,7 @@ router.get('/export/csv/:groupId', authenticate, async (req, res) => {
     const rows = result.rows.map(r => [
       `"${r.full_name.replace(/"/g, '""')}"`,
       r.email ? `"${r.email.replace(/"/g, '""')}"` : '""',
-      r.subgroup_name ? `"${r.subgroup_name.replace(/"/g, '""')}"` : '""',
+      r.subgroup_id ? r.subgroup_id.toString() : '""',
       `"${r.date}"`,
       r.lesson_num,
       `"${r.title.replace(/"/g, '""')}"`,

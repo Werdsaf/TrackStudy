@@ -34,7 +34,7 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/groups/:groupId/students — добавить студентов
+// POST /groups/:groupId/students
 router.post('/:groupId/students', authenticate, async (req, res) => {
   const { groupId } = req.params;
   const students = req.body;
@@ -54,12 +54,12 @@ router.post('/:groupId/students', authenticate, async (req, res) => {
       if (!fullName) continue;
 
       await pool.query(
-        'INSERT INTO students (full_name, email, group_id, subgroup_name) VALUES ($1, $2, $3, $4)',
+        'INSERT INTO students (full_name, email, group_id, subgroup_id) VALUES ($1, $2, $3, $4)',
         [
           fullName,
           s.email?.trim() || null,
           parseInt(groupId),
-          s.subgroup_name?.trim() || null
+          s.subgroup_id != null ? parseInt(s.subgroup_id) : null
         ]
       );
     }
@@ -71,14 +71,23 @@ router.post('/:groupId/students', authenticate, async (req, res) => {
   }
 });
 
-// GET /api/groups/:groupId/students
+// GET /groups/:groupId/students
 router.get('/:groupId/students', authenticate, async (req, res) => {
   const { groupId } = req.params;
+  const { subgroup_id } = req.query; // ← теперь integer
+
+  let query = 'SELECT id, full_name, email, subgroup_id FROM students WHERE group_id = $1';
+  const params = [groupId];
+
+  if (subgroup_id !== undefined) {
+    params.push(parseInt(subgroup_id));
+    query += ' AND subgroup_id = $' + params.length;
+  }
+
+  query += ' ORDER BY subgroup_id NULLS LAST, full_name';
+
   try {
-    const result = await pool.query(
-      'SELECT id, full_name, email, subgroup_name FROM students WHERE group_id = $1 ORDER BY subgroup_name NULLS LAST, full_name',
-      [groupId]
-    );
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('[GET STUDENTS]', err);

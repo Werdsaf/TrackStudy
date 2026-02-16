@@ -26,7 +26,7 @@
       </div>
       <div class="form-group">
         <label>Фильтр по подгруппе (опц.)</label>
-        <input type="text" id="subgroup-filter" placeholder="Напр. 1, А, Б" oninput="loadAttendance()">
+        <input type="number" id="subgroup-filter" placeholder="Напр. 1, 2" oninput="loadAttendance()">
       </div>
       <div class="form-group">
         <label>Дата начала</label>
@@ -38,7 +38,7 @@
       </div>
       <button type="button" class="btn btn-outline" onclick="exportCSV()">Экспорт CSV</button>
 
-      <div style="display: flex; gap: 2rem;">
+      <div style="display: flex; gap: 2rem; margin-top: 1rem;">
         <div class="table-responsive" style="flex-grow: 1;">
           <table class="calendar-table" id="attendance-table">
             <thead>
@@ -63,10 +63,9 @@
         ">
           <h4>Итого по таблице</h4>
           <div id="summary-content">
-            <p>Присутствовало: <span id="present-count">0</span></p>
-            <p>Уважительно: <span id="up-count">0</span></p>
-            <p>Неуважительно: <span id="np-count">0</span></p>
-            <p>Болел: <span id="b-count">0</span></p>
+            <p>Уважительно (<span style="color:#16a34a;">УП</span>): <span id="up-count">0</span></p>
+            <p>Неуважительно (<span style="color:#dc2626;">НП</span>): <span id="np-count">0</span></p>
+            <p>Болел (<span style="color:#d97706;">Б</span>): <span id="b-count">0</span></p>
             <p><strong>Всего отсутствовали: <span id="total-absent">0</span></strong></p>
           </div>
         </div>
@@ -110,7 +109,7 @@
       const gid = document.getElementById('group-select').value;
       if (!gid) {
         document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Выберите группу</td></tr>';
-        updateSummaryStats(0, 0, 0, 0);
+        updateSummaryStats(0, 0, 0);
         return;
       }
       currentGroupId = gid;
@@ -118,6 +117,7 @@
       const from = document.getElementById('date-from').value;
       const to = document.getElementById('date-to').value;
       const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
+      const subgroupId = subgroupFilter ? parseInt(subgroupFilter) : undefined;
 
       try {
         // 1. Получить занятия
@@ -125,7 +125,7 @@
         const params = new URLSearchParams();
         if (from) params.append('date_from', from);
         if (to) params.append('date_to', to);
-        if (subgroupFilter) params.append('subgroup_name', subgroupFilter);
+        if (subgroupId !== undefined) params.append('subgroup_id', subgroupId);
         if (params.toString()) lessonsUrl += '&' + params.toString();
 
         const lessonsRes = await fetch(lessonsUrl, {
@@ -136,14 +136,14 @@
         if (!Array.isArray(lessons)) {
           console.error('Ожидался массив занятий, получено:', lessons);
           document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет занятий для этой подгруппы.</td></tr>';
-          updateSummaryStats(0, 0, 0, 0);
+          updateSummaryStats(0, 0, 0);
           return;
         }
 
-        // 2. Получить студентов (с фильтром по подгруппе)
+        // 2. Получить студентов (с фильтром по subgroup_id)
         let studentsUrl = `/api/groups/${gid}/students`;
-        if (subgroupFilter) {
-          studentsUrl += `?subgroup_name=${encodeURIComponent(subgroupFilter)}`;
+        if (subgroupId !== undefined) {
+          studentsUrl += `?subgroup_id=${subgroupId}`;
         }
         const studentsRes = await fetch(studentsUrl, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -153,7 +153,7 @@
         if (!Array.isArray(students)) {
           console.error('Ожидался массив студентов, получено:', students);
           document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
-          updateSummaryStats(0, 0, 0, 0);
+          updateSummaryStats(0, 0, 0);
           return;
         }
 
@@ -174,97 +174,88 @@
         });
         const attendanceData = await attRes.json();
 
-        // 4. Собрать данные и посчитать статусы
-        let presentTotal = 0;
-        let upTotal = 0;
-        let npTotal = 0;
-        let bTotal = 0;
-
-        const result = [];
-        for (const student of students) {
+        // 4. Собрать данные
+        const result = students.map(student => {
           const attRecord = attendanceData.find(r => r.student.id === student.id);
           const studentLessons = [];
 
           for (const lesson of lessons) {
             if (attRecord && attRecord.lessons) {
               const lessonData = attRecord.lessons.find(l => l.lesson_id === lesson.id);
-              const status = lessonData?.status || 'Н';
-
-              // Счётчики
-              if (status === 'П') presentTotal++;
-              else if (status === 'УП') upTotal++;
-              else if (status === 'НП') npTotal++;
-              else if (status === 'Б') bTotal++;
-
               studentLessons.push({
                 lesson_id: lesson.id,
                 date: lesson.date,
                 lesson_num: lesson.lesson_num,
                 title: lesson.title,
-                status: status,
+                status: lessonData?.status || 'Н',
                 note: lessonData?.note || null
               });
             } else {
-              const status = 'Н';
               studentLessons.push({
                 lesson_id: lesson.id,
                 date: lesson.date,
                 lesson_num: lesson.lesson_num,
                 title: lesson.title,
-                status: status,
+                status: 'Н',
                 note: null
               });
             }
           }
 
-          result.push({
+          return {
             student: student,
             lessons: studentLessons
-          });
-        }
+          };
+        });
 
         // 5. Генерация таблицы
         const thead = document.querySelector('#attendance-table thead tr');
         thead.innerHTML = '<th>Студент</th>';
         lessons.forEach(lesson => {
-          const sub = lesson.subgroup_name ? ` [${lesson.subgroup_name}]` : '';
-          thead.innerHTML += `<th class="date-header">${lesson.date}<br><small>№${lesson.lesson_num}${sub}</small></th>`;
+          // Форматируем дату как DD.MM.YYYY
+          const d = new Date(lesson.date);
+          const formattedDate = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+          const sub = lesson.subgroup_id ? ` [${lesson.subgroup_id}]` : '';
+          thead.innerHTML += `<th class="date-header">${formattedDate}<br><small>№${lesson.lesson_num}${sub}</small></th>`;
         });
 
         const tbody = document.getElementById('attendance-body');
         tbody.innerHTML = '';
         if (result.length === 0) {
           tbody.innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
-          updateSummaryStats(0, 0, 0, 0);
+          updateSummaryStats(0, 0, 0);
           return;
         }
 
+        // Считаем статусы по всей таблице
+        let upTotal = 0, npTotal = 0, bTotal = 0;
+
         result.forEach(item => {
           const { student, lessons: studentLessons } = item;
-          const subgroupText = student.subgroup_name ? ` (${student.subgroup_name})` : '';
+          const subgroupText = student.subgroup_id ? ` (${student.subgroup_id})` : '';
           let row = `<tr><td>${student.full_name}${subgroupText}</td>`;
-          lessons.forEach(lesson => {
-            const l = studentLessons.find(it => it.lesson_id === lesson.id);
-            const status = l?.status || 'Н';
+          studentLessons.forEach(lesson => {
+            const status = lesson.status || 'Н';
+            if (status === 'УП') upTotal++;
+            else if (status === 'НП') npTotal++;
+            else if (status === 'Б') bTotal++;
             row += `<td><span class="status-badge status-${status}">${status}</span></td>`;
           });
           row += '</tr>';
           tbody.innerHTML += row;
         });
 
-        // ✅ Обновляем итоговую статистику
-        updateSummaryStats(presentTotal, upTotal, npTotal, bTotal);
+        // Обновляем итоговую статистику
+        updateSummaryStats(upTotal, npTotal, bTotal);
 
       } catch (err) {
         console.error('Ошибка загрузки посещаемости:', err);
         document.getElementById('attendance-body').innerHTML = `<tr><td colspan="100" style="text-align:center; color:#f87171; padding:2rem;">Ошибка: ${err.message}</td></tr>`;
-        updateSummaryStats(0, 0, 0, 0);
+        updateSummaryStats(0, 0, 0);
       }
     }
 
-    // Обновить итоговую статистику справа
-    function updateSummaryStats(present, up, np, b) {
-      document.getElementById('present-count').textContent = present;
+    function updateSummaryStats(up, np, b) {
       document.getElementById('up-count').textContent = up;
       document.getElementById('np-count').textContent = np;
       document.getElementById('b-count').textContent = b;
@@ -282,12 +273,13 @@
       const from = document.getElementById('date-from').value;
       const to = document.getElementById('date-to').value;
       const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
+      const subgroupId = subgroupFilter ? parseInt(subgroupFilter) : undefined;
 
       let url = `/api/attendance/export/csv/${gid}`;
       const params = new URLSearchParams();
       if (from) params.append('date_from', from);
       if (to) params.append('date_to', to);
-      if (subgroupFilter) params.append('subgroup_name', subgroupFilter);
+      if (subgroupId !== undefined) params.append('subgroup_id', subgroupId);
       if (params.toString()) url += '?' + params.toString();
 
       window.open(url, '_blank');

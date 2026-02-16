@@ -8,7 +8,7 @@
 <body>
   <div class="container">
     <header>
-      <div class="logo">Мониторинг студентов</div>
+      <div class="logo">TrackStudy</div>
       <div class="nav-links">
         <a href="create-group.html">Группы</a>
         <a href="mark-attendance.html" class="active">Отметка</a>
@@ -18,7 +18,7 @@
     </header>
 
     <main style="max-width: 800px; margin: 2rem auto;">
-      <h2>Отметка посещаемости</h2>
+      <h2>Отметка посещаемости**</h2>
 
       <!-- Форма выбора -->
       <div class="form-group">
@@ -30,7 +30,7 @@
         <input type="date" id="date-picker" onchange="loadLessons()" required>
       </div>
       <div class="form-group">
-        <label>Занятие</label>
+        <label>Занятие**</label>
         <select id="lesson-select" disabled>
           <option>Выберите группу и дату</option>
         </select>
@@ -38,7 +38,7 @@
           + Создать занятие
         </button>
       </div>
-      <button type="button" class="btn" onclick="loadStudents()">Загрузить студентов</button>
+      <button type="button" class="btn" onclick="loadStudents()">Загрузить студентов**</button>
 
       <!-- Список студентов -->
       <div id="attendance-grid" class="attendance-grid"></div>
@@ -58,21 +58,21 @@
           <input type="number" id="modal-lesson-num" min="1" required value="1">
         </div>
         <div class="form-group">
-          <label>Тема (название)</label>
+          <label>Тема (название)**</label>
           <input type="text" id="modal-title" placeholder="Напр. Лекция 3. Базы данных" required>
         </div>
         <div class="form-group">
-          <label>ID группы</label>
+          <label>ID группы**</label>
           <input type="number" id="modal-group-id" required placeholder="См. в разделе 'Группы'">
         </div>
         <div class="form-group">
           <label>Подгруппа (опц.)</label>
-          <input type="text" id="modal-subgroups" placeholder="Напр. 1, А, Б">
+          <input type="number" id="modal-subgroup-id" placeholder="Напр. 1, 2">
           <p style="font-size:0.85rem; color:#6b7280;">Оставьте пустым — занятие для всей группы</p>
         </div>
         <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-          <button type="button" class="btn" onclick="createLesson()">Создать</button>
-          <button type="button" class="btn btn-outline" onclick="closeModal()">Отмена</button>
+          <button type="button" class="btn" onclick="createLesson()">Создать**</button>
+          <button type="button" class="btn btn-outline" onclick="closeModal()">Отмена**</button>
         </div>
       </div>
     </div>
@@ -107,7 +107,7 @@
       }
     }
 
-    // Загрузить занятия
+    // Загрузить занятия по группе и дате
     async function loadLessons() {
       const groupId = document.getElementById('group-select').value;
       const date = document.getElementById('date-picker').value;
@@ -135,8 +135,11 @@
         lessons.forEach(l => {
           const opt = document.createElement('option');
           opt.value = l.id;
-          const sub = l.subgroup_name ? ` [${l.subgroup_name}]` : '';
-          opt.textContent = `№${l.lesson_num}: ${l.title}${sub} (${l.date})`;
+          // Форматируем дату как DD.MM.YYYY
+          const d = new Date(l.date);
+          const formattedDate = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+          const sub = l.subgroup_id ? ` [${l.subgroup_id}]` : '';
+          opt.textContent = `№${l.lesson_num}: ${l.title} (${formattedDate})${sub}`;
           lessonSel.appendChild(opt);
         });
         lessonSel.disabled = false;
@@ -166,7 +169,7 @@
       const num = document.getElementById('modal-lesson-num').value;
       const title = document.getElementById('modal-title').value.trim();
       const groupId = document.getElementById('modal-group-id').value;
-      const subgroupName = document.getElementById('modal-subgroups').value.trim();
+      const subgroupId = document.getElementById('modal-subgroup-id').value.trim();
 
       if (!date || !num || !title || !groupId) {
         alert('Заполните все обязательные поля');
@@ -185,7 +188,7 @@
             lesson_num: parseInt(num),
             title,
             group_id: parseInt(groupId),
-            subgroup_name: subgroupName || null
+            subgroup_id: subgroupId ? parseInt(subgroupId) : null
           })
         });
 
@@ -213,34 +216,38 @@
       }
       currentLessonId = lessonId;
 
+      const groupId = document.getElementById('group-select').value;
       try {
-        // Сначала получаем занятие, чтобы узнать subgroup_name
+        // 1. Получаем занятие, чтобы узнать его subgroup_id
         const lessonRes = await fetch(`/api/lessons?id=${lessonId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const lesson = (await lessonRes.json())[0]; // массив из 1 элемента
+        const lesson = (await lessonRes.json())[0];
+        if (!lesson) {
+          alert('Занятие не найдено');
+          return;
+        }
 
-        // Получаем всех студентов группы
-        const groupId = document.getElementById('group-select').value;
-        const studentsRes = await fetch(`/api/groups/${groupId}/students`, {
+        // 2. Загружаем студентов ТОЛЬКО этой подгруппы (или всех, если subgroup_id = null)
+        let studentsUrl = `/api/groups/${groupId}/students`;
+        if (lesson.subgroup_id !== null) {
+          studentsUrl += `?subgroup_id=${lesson.subgroup_id}`;
+        }
+
+        const studentsRes = await fetch(studentsUrl, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        const allStudents = await studentsRes.json();
-
-        // Фильтруем: если у занятия subgroup_name — показываем только тех, у кого subgroup_name совпадает
-        const filteredStudents = lesson.subgroup_name
-          ? allStudents.filter(s => s.subgroup_name === lesson.subgroup_name)
-          : allStudents;
+        const students = await studentsRes.json();
 
         const grid = document.getElementById('attendance-grid');
         grid.innerHTML = '';
-        filteredStudents.forEach(student => {
-          const lessonData = student.lessons ? student.lessons.find(l => l.lesson_id == lessonId) : null;
-          const status = lessonData?.status || 'Н';
+        students.forEach(student => {
+          const lessonData = student.lessons?.find(l => l.lesson_id == lessonId) || {};
+          const status = lessonData.status || 'Н';
 
           const card = document.createElement('div');
           card.className = 'student-card';
-          const subgroupText = student.subgroup_name ? ` (${student.subgroup_name})` : '';
+          const subgroupText = student.subgroup_id ? ` (${student.subgroup_id})` : '';
           card.innerHTML = `
             <div class="student-name">${student.full_name}${subgroupText}</div>
             <select class="status-select" data-student-id="${student.id}">
@@ -254,9 +261,10 @@
           grid.appendChild(card);
         });
 
-        if (filteredStudents.length === 0) {
-          grid.innerHTML = `<div style="text-align:center; padding:2rem; color:#6b7280;">Нет студентов в этой подгруппе.</div>`;
+        if (students.length === 0) {
+          grid.innerHTML = `<div style="text-align:center; padding:1rem; color:#6b7280;">Нет студентов в этой подгруппе.</div>`;
         }
+
       } catch (err) {
         console.error('Ошибка загрузки студентов:', err);
         alert('Не удалось загрузить студентов');
@@ -285,7 +293,7 @@
           });
         } catch (err) {
           console.error(`Ошибка для студента ${sid}:`, err);
-          alert(`Ошибка сохранения для студента ${sid}.`);
+          alert(`Ошибка сохранения для студента ${sid}. Проверьте соединение.`);
           return;
         }
       }
