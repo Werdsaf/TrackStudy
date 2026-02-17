@@ -2,7 +2,7 @@
 const request = require('supertest');
 const express = require('express');
 const pool = require('../../db');
-const { generateToken } = require('../../utils/jwt'); // ✅ используем вашу утилиту
+const { generateToken } = require('../../utils/jwt');
 
 // Импортируем маршруты
 const authRoutes = require('../../routes/auth');
@@ -25,20 +25,20 @@ describe('API Groups', () => {
   let userId;
 
   beforeAll(async () => {
-    // Создаём тестового куратора в БД
     const insertRes = await pool.query(
       'INSERT INTO users (email, password, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET password = $2 RETURNING id',
       ['test@example.com', '$2a$10$QqVv8HdKuTfDnMx7JgCJqeYrBtWlK8eLhJkLmN0oPqRsTuVwXyZa', 'curator']
     );
     userId = insertRes.rows[0].id;
 
-    
     token = generateToken(userId);
   });
 
   afterAll(async () => {
     await pool.query('DELETE FROM users WHERE email = $1', ['test@example.com']);
     await pool.query('DELETE FROM groups WHERE name = $1', ['Test Group']);
+
+    console.log('\n🧹 Тестовые данные очищены.');
   });
 
   test('POST /api/groups — создать группу', async () => {
@@ -49,6 +49,8 @@ describe('API Groups', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('Test Group');
+
+    console.log('[TEST] POST /api/groups: SUCCESS');
   });
 
   test('GET /api/groups — получить группы', async () => {
@@ -59,6 +61,8 @@ describe('API Groups', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThanOrEqual(1);
+
+    console.log('[TEST] GET /api/groups: SUCCESS');
   });
 
   test('POST /api/groups/:id/students — добавить студента с подгруппой', async () => {
@@ -79,5 +83,11 @@ describe('API Groups', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.message).toMatch(/Добавлено \d+ студентов/);
+
+    console.log('[TEST] POST /api/groups/:id/students: SUCCESS');
   });
+});
+
+afterAll(() => {
+  console.log('\n📊 Итог: Все API-тесты для /api/groups пройдены.\n');
 });
