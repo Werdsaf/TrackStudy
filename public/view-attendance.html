@@ -4,6 +4,38 @@
   <meta charset="UTF-8">
   <title>Просмотр посещаемости</title>
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Узкие колонки для статистики */
+    #attendance-table th:nth-child(2),
+    #attendance-table th:nth-child(3),
+    #attendance-table th:nth-child(4),
+    #attendance-table th:nth-child(5),
+    #attendance-table td:nth-child(2),
+    #attendance-table td:nth-child(3),
+    #attendance-table td:nth-child(4),
+    #attendance-table td:nth-child(5) {
+      width: 40px;
+      min-width: 40px;
+      text-align: center;
+      padding: 8px 4px;
+      font-size: 0.85rem;
+    }
+
+    /* Шапка дат — чуть больше */
+    #attendance-table th:nth-child(n+6),
+    #attendance-table td:nth-child(n+6) {
+      padding: 8px 6px;
+    }
+
+    /* Статусы — компактные */
+    .status-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      line-height: 1.2;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
@@ -36,7 +68,7 @@
         <label>Дата окончания</label>
         <input type="date" id="date-to" onchange="loadAttendance()">
       </div>
-      <button type="button" class="btn btn-outline" onclick="exportCSV()">Экспорт CSV</button>
+      <button type="button" class="btn btn-outline" onclick="exportExcel()">Экспорт в Excel</button>
 
       <div style="display: flex; gap: 2rem; margin-top: 1rem;">
         <div class="table-responsive" style="flex-grow: 1;">
@@ -44,6 +76,10 @@
             <thead>
               <tr>
                 <th>Студент</th>
+                <th>УП</th>
+                <th>НП</th>
+                <th>Б</th>
+                <th>Всего</th>
                 <!-- динамически -->
               </tr>
             </thead>
@@ -73,225 +109,279 @@
     </main>
   </div>
 
-  <script>
-    const token = localStorage.getItem('token');
-    if (!token) {
-      alert('Сначала войдите в систему.');
-      window.location.href = 'index.html';
-      exit;
+<script>
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Сначала войдите в систему.');
+    window.location.href = 'index.html';
+    exit;
+  }
+
+  let currentGroupId = null;
+
+  // Загрузить группы
+  async function loadGroups() {
+    try {
+      const res = await fetch('/api/groups', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const groups = await res.json();
+      const sel = document.getElementById('group-select');
+      sel.innerHTML = '<option value="">Выберите группу</option>';
+      groups.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g.id;
+        opt.textContent = `${g.name} (${g.id})`;
+        sel.appendChild(opt);
+      });
+    } catch (err) {
+      console.error('Ошибка загрузки групп:', err);
+      alert('Не удалось загрузить группы.');
     }
+  }
 
-    let currentGroupId = null;
-
-    // Загрузить группы
-    async function loadGroups() {
-      try {
-        const res = await fetch('/api/groups', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const groups = await res.json();
-        const sel = document.getElementById('group-select');
-        sel.innerHTML = '<option value="">Выберите группу</option>';
-        groups.forEach(g => {
-          const opt = document.createElement('option');
-          opt.value = g.id;
-          opt.textContent = `${g.name} (${g.id})`;
-          sel.appendChild(opt);
-        });
-      } catch (err) {
-        console.error('Ошибка загрузки групп:', err);
-        alert('Не удалось загрузить группы.');
-      }
+  // Загрузить посещаемость
+  async function loadAttendance() {
+    const gid = document.getElementById('group-select').value;
+    if (!gid) {
+      document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Выберите группу</td></tr>';
+      updateSummaryStats(0, 0, 0);
+      return;
     }
+    currentGroupId = gid;
 
-    // Загрузить посещаемость
-    async function loadAttendance() {
-      const gid = document.getElementById('group-select').value;
-      if (!gid) {
-        document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Выберите группу</td></tr>';
-        updateSummaryStats(0, 0, 0);
-        return;
-      }
-      currentGroupId = gid;
+    const from = document.getElementById('date-from').value;
+    const to = document.getElementById('date-to').value;
+    const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
+    const subgroupId = subgroupFilter ? parseInt(subgroupFilter) : undefined;
 
-      const from = document.getElementById('date-from').value;
-      const to = document.getElementById('date-to').value;
-      const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
-      const subgroupId = subgroupFilter ? parseInt(subgroupFilter) : undefined;
-
-      try {
-        // 1. Получить занятия
-        let lessonsUrl = `/api/lessons?group_id=${gid}`;
-        const params = new URLSearchParams();
-        if (from) params.append('date_from', from);
-        if (to) params.append('date_to', to);
-        if (subgroupId !== undefined) params.append('subgroup_id', subgroupId);
-        if (params.toString()) lessonsUrl += '&' + params.toString();
-
-        const lessonsRes = await fetch(lessonsUrl, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const lessons = await lessonsRes.json();
-
-        if (!Array.isArray(lessons)) {
-          console.error('Ожидался массив занятий, получено:', lessons);
-          document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет занятий для этой подгруппы.</td></tr>';
-          updateSummaryStats(0, 0, 0);
-          return;
-        }
-
-        // 2. Получить студентов (с фильтром по subgroup_id)
-        let studentsUrl = `/api/groups/${gid}/students`;
-        if (subgroupId !== undefined) {
-          studentsUrl += `?subgroup_id=${subgroupId}`;
-        }
-        const studentsRes = await fetch(studentsUrl, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const students = await studentsRes.json();
-
-        if (!Array.isArray(students)) {
-          console.error('Ожидался массив студентов, получено:', students);
-          document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
-          updateSummaryStats(0, 0, 0);
-          return;
-        }
-
-        // 3. Получить посещаемость
-        const lessonIds = lessons.map(l => l.id);
-        const studentIds = students.map(s => s.id);
-
-        let attUrl = `/api/attendance/group/${gid}`;
-        const attParams = new URLSearchParams();
-        if (from) attParams.append('date_from', from);
-        if (to) attParams.append('date_to', to);
-        if (lessonIds.length > 0) attParams.append('lesson_ids', lessonIds.join(','));
-        if (studentIds.length > 0) attParams.append('student_ids', studentIds.join(','));
-        if (attParams.toString()) attUrl += '?' + attParams.toString();
-
-        const attRes = await fetch(attUrl, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const attendanceData = await attRes.json();
-
-        // 4. Собрать данные
-        const result = students.map(student => {
-          const attRecord = attendanceData.find(r => r.student.id === student.id);
-          const studentLessons = [];
-
-          for (const lesson of lessons) {
-            if (attRecord && attRecord.lessons) {
-              const lessonData = attRecord.lessons.find(l => l.lesson_id === lesson.id);
-              studentLessons.push({
-                lesson_id: lesson.id,
-                date: lesson.date,
-                lesson_num: lesson.lesson_num,
-                title: lesson.title,
-                status: lessonData?.status || 'Н',
-                note: lessonData?.note || null
-              });
-            } else {
-              studentLessons.push({
-                lesson_id: lesson.id,
-                date: lesson.date,
-                lesson_num: lesson.lesson_num,
-                title: lesson.title,
-                status: 'Н',
-                note: null
-              });
-            }
-          }
-
-          return {
-            student: student,
-            lessons: studentLessons
-          };
-        });
-
-        // 5. Генерация таблицы
-        const thead = document.querySelector('#attendance-table thead tr');
-        thead.innerHTML = '<th>Студент</th>';
-        lessons.forEach(lesson => {
-          // Форматируем дату как DD.MM.YYYY
-          const d = new Date(lesson.date);
-          const formattedDate = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
-          const sub = lesson.subgroup_id ? ` [${lesson.subgroup_id}]` : '';
-          thead.innerHTML += `<th class="date-header">${formattedDate}<br><small>№${lesson.lesson_num}${sub}</small></th>`;
-        });
-
-        const tbody = document.getElementById('attendance-body');
-        tbody.innerHTML = '';
-        if (result.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
-          updateSummaryStats(0, 0, 0);
-          return;
-        }
-
-        // Считаем статусы по всей таблице
-        let upTotal = 0, npTotal = 0, bTotal = 0;
-
-        result.forEach(item => {
-          const { student, lessons: studentLessons } = item;
-          const subgroupText = student.subgroup_id ? ` (${student.subgroup_id})` : '';
-          let row = `<tr><td>${student.full_name}${subgroupText}</td>`;
-          studentLessons.forEach(lesson => {
-            const status = lesson.status || 'Н';
-            if (status === 'УП') upTotal++;
-            else if (status === 'НП') npTotal++;
-            else if (status === 'Б') bTotal++;
-            row += `<td><span class="status-badge status-${status}">${status}</span></td>`;
-          });
-          row += '</tr>';
-          tbody.innerHTML += row;
-        });
-
-        // Обновляем итоговую статистику
-        updateSummaryStats(upTotal, npTotal, bTotal);
-
-      } catch (err) {
-        console.error('Ошибка загрузки посещаемости:', err);
-        document.getElementById('attendance-body').innerHTML = `<tr><td colspan="100" style="text-align:center; color:#f87171; padding:2rem;">Ошибка: ${err.message}</td></tr>`;
-        updateSummaryStats(0, 0, 0);
-      }
-    }
-
-    function updateSummaryStats(up, np, b) {
-      document.getElementById('up-count').textContent = up;
-      document.getElementById('np-count').textContent = np;
-      document.getElementById('b-count').textContent = b;
-      document.getElementById('total-absent').textContent = up + np + b;
-    }
-
-    // Экспорт CSV
-    async function exportCSV() {
-      const gid = document.getElementById('group-select').value;
-      if (!gid) {
-        alert('Выберите группу');
-        return;
-      }
-
-      const from = document.getElementById('date-from').value;
-      const to = document.getElementById('date-to').value;
-      const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
-      const subgroupId = subgroupFilter ? parseInt(subgroupFilter) : undefined;
-
-      let url = `/api/attendance/export/csv/${gid}`;
+    try {
+      // 1. Получить занятия
+      let lessonsUrl = `/api/lessons?group_id=${gid}`;
       const params = new URLSearchParams();
       if (from) params.append('date_from', from);
       if (to) params.append('date_to', to);
       if (subgroupId !== undefined) params.append('subgroup_id', subgroupId);
-      if (params.toString()) url += '?' + params.toString();
+      if (params.toString()) lessonsUrl += '&' + params.toString();
 
-      window.open(url, '_blank');
+      const lessonsRes = await fetch(lessonsUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const lessons = await lessonsRes.json();
+
+      if (!Array.isArray(lessons)) {
+        console.error('Ожидался массив занятий, получено:', lessons);
+        document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет занятий для этой подгруппы.</td></tr>';
+        updateSummaryStats(0, 0, 0);
+        return;
+      }
+
+      // 2. Получить студентов
+      let studentsUrl = `/api/groups/${gid}/students`;
+      if (subgroupId !== undefined) {
+        studentsUrl += `?subgroup_id=${subgroupId}`;
+      }
+      const studentsRes = await fetch(studentsUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const students = await studentsRes.json();
+
+      if (!Array.isArray(students)) {
+        console.error('Ожидался массив студентов, получено:', students);
+        document.getElementById('attendance-body').innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+        updateSummaryStats(0, 0, 0);
+        return;
+      }
+
+      // 3. Получить посещаемость
+      const lessonIds = lessons.map(l => l.id);
+      const studentIds = students.map(s => s.id);
+
+      let attUrl = `/api/attendance/group/${gid}`;
+      const attParams = new URLSearchParams();
+      if (from) attParams.append('date_from', from);
+      if (to) attParams.append('date_to', to);
+      if (lessonIds.length > 0) attParams.append('lesson_ids', lessonIds.join(','));
+      if (studentIds.length > 0) attParams.append('student_ids', studentIds.join(','));
+      if (attParams.toString()) attUrl += '?' + attParams.toString();
+
+      const attRes = await fetch(attUrl, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const attendanceData = await attRes.json();
+
+      // 4. Собрать данные с индивидуальной статистикой
+      const result = students.map(student => {
+        const attRecord = attendanceData.find(r => r.student.id === student.id);
+        const studentLessons = [];
+        let up = 0, np = 0, b = 0;
+
+        for (const lesson of lessons) {
+          if (attRecord && attRecord.lessons) {
+            const lessonData = attRecord.lessons.find(l => l.lesson_id === lesson.id);
+            const status = lessonData?.status || 'Н';
+            if (status === 'УП') up++;
+            else if (status === 'НП') np++;
+            else if (status === 'Б') b++;
+            studentLessons.push({
+              lesson_id: lesson.id,
+              date: lesson.date,
+              lesson_num: lesson.lesson_num,
+              title: lesson.title,
+              status: status,
+              note: lessonData?.note || null
+            });
+          } else {
+            studentLessons.push({
+              lesson_id: lesson.id,
+              date: lesson.date,
+              lesson_num: lesson.lesson_num,
+              title: lesson.title,
+              status: 'Н',
+              note: null
+            });
+          }
+        }
+
+        return {
+          student: student,
+          lessons: studentLessons,
+          stats: { up, np, b, total: up + np + b }
+        };
+      });
+
+      // 5. Генерация таблицы
+      const thead = document.querySelector('#attendance-table thead tr');
+      thead.innerHTML = `
+        <th>Студент</th>
+        <th>УП</th>
+        <th>НП</th>
+        <th>Б</th>
+        <th>Всего</th>
+      `;
+      lessons.forEach(lesson => {
+      const d = new Date(lesson.date);
+      const formattedDate = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const sub = lesson.subgroup_id != null ? ` [${lesson.subgroup_id}]` : '';
+      const titleShort = lesson.title.length > 8 
+        ? lesson.title.substring(0, 8) + '...' 
+        : lesson.title;
+
+      thead.innerHTML += `<th class="date-header">
+        ${formattedDate}<br>
+        <small>№${lesson.lesson_num} ${titleShort}${sub}</small>
+      </th>`;
+      });
+
+      const tbody = document.getElementById('attendance-body');
+      tbody.innerHTML = '';
+      if (result.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="100" style="text-align:center; padding:2rem;">Нет студентов в этой подгруппе.</td></tr>';
+        updateSummaryStats(0, 0, 0);
+        return;
+      }
+
+      // Считаем общую статистику по таблице
+      let upTotal = 0, npTotal = 0, bTotal = 0;
+      result.forEach(item => {
+        upTotal += item.stats.up;
+        npTotal += item.stats.np;
+        bTotal += item.stats.b;
+      });
+
+      // Рисуем строки
+      result.forEach(item => {
+        const { student, lessons, stats } = item;
+        const subgroupText = student.subgroup_id ? ` (${student.subgroup_id})` : '';
+        let row = `<tr>
+          <td>${student.full_name}${subgroupText}</td>
+          <td>${stats.up}</td>
+          <td>${stats.np}</td>
+          <td>${stats.b}</td>
+          <td><strong>${stats.total}</strong></td>
+        `;
+
+        lessons.forEach(lesson => {
+          const status = lesson.status || 'Н';
+          row += `<td><span class="status-badge status-${status}">${status}</span></td>`;
+        });
+        row += '</tr>';
+        tbody.innerHTML += row;
+      });
+
+      // Обновляем итоговую статистику справа
+      updateSummaryStats(upTotal, npTotal, bTotal);
+
+    } catch (err) {
+      console.error('Ошибка загрузки посещаемости:', err);
+      document.getElementById('attendance-body').innerHTML = `<tr><td colspan="100" style="text-align:center; color:#f87171; padding:2rem;">Ошибка: ${err.message}</td></tr>`;
+      updateSummaryStats(0, 0, 0);
+    }
+  }
+
+  function updateSummaryStats(up, np, b) {
+    document.getElementById('up-count').textContent = up;
+    document.getElementById('np-count').textContent = np;
+    document.getElementById('b-count').textContent = b;
+    document.getElementById('total-absent').textContent = up + np + b;
+  }
+
+  // Экспорт в Excel
+  async function exportExcel() {
+    const gid = document.getElementById('group-select').value;
+    if (!gid) {
+      alert('Выберите группу');
+      return;
     }
 
-    function logout() {
-      localStorage.removeItem('token');
-      window.location.href = 'index.html';
-    }
+    const from = document.getElementById('date-from').value;
+    const to = document.getElementById('date-to').value;
+    const subgroupFilter = document.getElementById('subgroup-filter').value.trim();
 
-    // Инициализация
-    loadGroups();
-  </script>
+    let url = `/api/attendance/export/xlsx/${gid}`;
+    const params = new URLSearchParams();
+    if (from) params.append('date_from', from);
+    if (to) params.append('date_to', to);
+    if (subgroupFilter) params.append('subgroup_id', subgroupFilter);
+    if (params.toString()) url += '?' + params.toString();
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Ошибка экспорта');
+      }
+
+      const blob = await response.blob();
+      const urlBlob = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = urlBlob;
+      a.download = `посещаемость_группа_${gid}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(urlBlob);
+
+      alert('✅ Экспорт в Excel выполнен!');
+    } catch (err) {
+      console.error('Ошибка экспорта:', err);
+      alert('Ошибка: ' + err.message);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('token');
+    window.location.href = 'index.html';
+  }
+
+  // Инициализация
+  loadGroups();
+</script>
 </body>
 </html>

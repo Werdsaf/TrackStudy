@@ -10,6 +10,7 @@ const groupsRoutes = require('./routes/groups');
 const lessonsRoutes = require('./routes/lessons');
 const attendanceRoutes = require('./routes/attendance');
 const statsRoutes = require('./routes/stats');
+const exportRoutes = require('./routes/export');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +25,7 @@ app.use('/api/groups', groupsRoutes);
 app.use('/api/lessons', lessonsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/attendance', exportRoutes);
 
 // Статика
 app.use(express.static(path.join(__dirname, 'public')));
@@ -42,4 +44,5 @@ app.use((err, req, res, next) => {
 // Запуск сервера
 app.listen(PORT, () => {
   console.log(`✅ Сервер запущен на http://localhost:${PORT}`);
+  console.log(process.env.JWT_SECRET)
 });
