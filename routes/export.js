@@ -5,11 +5,21 @@ const pool = require('../db');
 const authenticate = require('../middleware/auth');
 const ExcelJS = require('exceljs');
 
+// GET /api/attendance/export/xlsx/:groupId
 router.get('/export/xlsx/:groupId', authenticate, async (req, res) => {
   const { groupId } = req.params;
   const { date_from, date_to, subgroup_id } = req.query;
 
   try {
+    // Проверяем, принадлежит ли группа куратору
+    const groupCheck = await pool.query(
+      'SELECT id FROM groups WHERE id = $1 AND created_by = $2',
+      [groupId, req.user.id]
+    );
+    if (groupCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Группа не принадлежит вам' });
+    }
+
     // 1. Получить студентов
     let studentsQuery = 'SELECT id, full_name, email, subgroup_id FROM students WHERE group_id = $1';
     const studentsParams = [groupId];

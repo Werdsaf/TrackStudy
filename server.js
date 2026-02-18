@@ -42,7 +42,22 @@ app.use((err, req, res, next) => {
 });
 
 // Запуск сервера
-app.listen(PORT, () => {
-  console.log(`✅ Сервер запущен на http://localhost:${PORT}`);
-  console.log(process.env.JWT_SECRET)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Сервер запущен на http://0.0.0.0:${PORT}`);
+  console.log(`📱 Доступен по IP: http://${getLocalIP()}:${PORT}`);
 });
+
+// Вспомогательная функция для получения локального IP
+function getLocalIP() {
+  const os = require('os');
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.internal || iface.family !== 'IPv4') continue;
+      if (iface.address.startsWith('192.168.') || iface.address.startsWith('10.') || iface.address.startsWith('172.')) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}

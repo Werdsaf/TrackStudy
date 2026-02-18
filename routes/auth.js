@@ -1,3 +1,4 @@
+// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
@@ -8,10 +9,10 @@ router.post('/register', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Проверяем, есть ли уже куратор
-    const countRes = await pool.query('SELECT COUNT(*) FROM users');
-    if (parseInt(countRes.rows[0].count) > 0) {
-      return res.status(400).json({ error: 'Куратор уже существует. Регистрация запрещена.' });
+    // Проверяем, существует ли уже пользователь с таким email
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'Пользователь с таким email уже существует' });
     }
 
     const hashed = await bcrypt.hash(password, 10);

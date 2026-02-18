@@ -4,10 +4,13 @@ const router = express.Router();
 const pool = require('../db');
 const authenticate = require('../middleware/auth');
 
-// GET /api/groups — список групп
+// GET /api/groups — список групп, принадлежащих текущему куратору
 router.get('/', authenticate, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, name, description FROM groups ORDER BY created_at DESC');
+    const result = await pool.query(
+      'SELECT id, name, description FROM groups WHERE created_by = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('[GET GROUPS]', err);
@@ -15,7 +18,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/groups — создать группу
+// POST /api/groups — создать группу от имени текущего куратора
 router.post('/', authenticate, async (req, res) => {
   const { name, description } = req.body;
   if (!name || typeof name !== 'string' || name.trim() === '') {
@@ -34,7 +37,7 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-// POST /groups/:groupId/students
+// POST /groups/:groupId/students — добавить студентов в группу (проверка, что группа принадлежит куратору)
 router.post('/:groupId/students', authenticate, async (req, res) => {
   const { groupId } = req.params;
   const students = req.body;
@@ -44,9 +47,13 @@ router.post('/:groupId/students', authenticate, async (req, res) => {
   }
 
   try {
-    const groupRes = await pool.query('SELECT id FROM groups WHERE id = $1', [groupId]);
+    // Проверяем, принадлежит ли группа текущему куратору
+    const groupRes = await pool.query(
+      'SELECT id FROM groups WHERE id = $1 AND created_by = $2',
+      [groupId, req.user.id]
+    );
     if (groupRes.rows.length === 0) {
-      return res.status(404).json({ error: `Группа с ID=${groupId} не найдена` });
+      return res.status(404).json({ error: `Группа с ID=${groupId} не найдена или не принадлежит вам` });
     }
 
     for (const s of students) {
@@ -71,13 +78,22 @@ router.post('/:groupId/students', authenticate, async (req, res) => {
   }
 });
 
-// GET /groups/:groupId/students
+// GET /groups/:groupId/students — получить студентов группы (только если группа принадлежит куратору)
 router.get('/:groupId/students', authenticate, async (req, res) => {
   const { groupId } = req.params;
-  const { subgroup_id } = req.query; // ← теперь integer
+  const { subgroup_id } = req.query;
 
   let query = 'SELECT id, full_name, email, subgroup_id FROM students WHERE group_id = $1';
   const params = [groupId];
+
+  // Проверяем, принадлежит ли группа куратору
+  const groupCheck = await pool.query(
+    'SELECT id FROM groups WHERE id = $1 AND created_by = $2',
+    [groupId, req.user.id]
+  );
+  if (groupCheck.rows.length === 0) {
+    return res.status(404).json({ error: `Группа с ID=${groupId} не найдена или не принадлежит вам` });
+  }
 
   if (subgroup_id !== undefined) {
     params.push(parseInt(subgroup_id));
@@ -95,4 +111,4 @@ router.get('/:groupId/students', authenticate, async (req, res) => {
   }
 });
 
-module.exports = router; // ← ЭТА СТРОКА ОБЯЗАТЕЛЬНА!
+module.exports = router;

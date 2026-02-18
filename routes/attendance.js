@@ -4,10 +4,19 @@ const router = express.Router();
 const pool = require('../db');
 const authenticate = require('../middleware/auth');
 
-// GET /attendance/group/:groupId
+// GET /attendance/group/:groupId — получить посещаемость для своей группы
 router.get('/group/:groupId', authenticate, async (req, res) => {
   const { groupId } = req.params;
   const { date_from, date_to, lesson_ids, student_ids } = req.query;
+
+  // Проверяем, принадлежит ли группа куратору
+  const groupCheck = await pool.query(
+    'SELECT id FROM groups WHERE id = $1 AND created_by = $2',
+    [groupId, req.user.id]
+  );
+  if (groupCheck.rows.length === 0) {
+    return res.status(403).json({ error: 'Группа не принадлежит вам' });
+  }
 
   try {
     // Получить занятия
@@ -56,7 +65,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
       attendance = attRes.rows;
     }
 
-    // Собрать результат: [{ student, lessons: [...] }]
+    // Собрать результат
     const result = [];
     for (const sid of studentIds) {
       const studentRes = await pool.query(
@@ -99,7 +108,7 @@ router.get('/group/:groupId', authenticate, async (req, res) => {
   }
 });
 
-// PUT /attendance/:lessonId/students/:studentId
+// PUT /attendance/:lessonId/students/:studentId — обновить статус (проверка принадлежности)
 router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   const { lessonId, studentId } = req.params;
   const { status, note } = req.body;
@@ -109,6 +118,19 @@ router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   }
 
   try {
+    // Проверяем, принадлежит ли занятие и студент куратору
+    const check = await pool.query(`
+      SELECT 1 FROM lessons l
+      JOIN students s ON l.group_id = s.group_id
+      WHERE l.id = $1 AND s.id = $2 AND l.group_id IN (
+        SELECT id FROM groups WHERE created_by = $3
+      )
+    `, [lessonId, studentId, req.user.id]);
+
+    if (check.rows.length === 0) {
+      return res.status(403).json({ error: 'Занятие или студент не принадлежат вам' });
+    }
+
     const result = await pool.query(
       `INSERT INTO attendance (student_id, lesson_id, status, note)
        VALUES ($1, $2, $3, $4)
@@ -121,67 +143,6 @@ router.put('/:lessonId/students/:studentId', authenticate, async (req, res) => {
   } catch (err) {
     console.error('[ATTENDANCE PUT]', err);
     res.status(500).json({ error: 'Не удалось обновить посещаемость' });
-  }
-});
-
-// GET /attendance/export/csv/:groupId
-router.get('/export/csv/:groupId', authenticate, async (req, res) => {
-  const { groupId } = req.params;
-  const { date_from, date_to, subgroup_id } = req.query;
-
-  try {
-    let where = 'WHERE s.group_id = $1';
-    const params = [groupId];
-
-    if (date_from) {
-      params.push(date_from);
-      where += ' AND l.date >= $' + params.length;
-    }
-    if (date_to) {
-      params.push(date_to);
-      where += ' AND l.date <= $' + params.length;
-    }
-    if (subgroup_id !== undefined) {
-      params.push(parseInt(subgroup_id));
-      where += ' AND s.subgroup_id = $' + params.length;
-    }
-
-    const result = await pool.query(`
-      SELECT
-        s.full_name,
-        s.email,
-        s.subgroup_id,
-        l.date,
-        l.lesson_num,
-        l.title,
-        COALESCE(a.status, 'Н') AS status,
-        a.note
-      FROM students s
-      JOIN lessons l ON l.group_id = s.group_id
-      LEFT JOIN attendance a ON a.student_id = s.id AND a.lesson_id = l.id
-      ${where}
-      ORDER BY s.full_name, l.date, l.lesson_num
-    `, params);
-
-    const headers = ['ФИО', 'Email', 'Подгруппа', 'Дата', '№ занятия', 'Тема', 'Статус', 'Примечание'];
-    const rows = result.rows.map(r => [
-      `"${r.full_name.replace(/"/g, '""')}"`,
-      r.email ? `"${r.email.replace(/"/g, '""')}"` : '""',
-      r.subgroup_id ? r.subgroup_id.toString() : '""',
-      `"${r.date}"`,
-      r.lesson_num,
-      `"${r.title.replace(/"/g, '""')}"`,
-      r.status,
-      r.note ? `"${r.note.replace(/"/g, '""')}"` : '""'
-    ]);
-
-    const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="посещаемость.csv"');
-    res.send('\uFEFF' + csv);
-  } catch (err) {
-    console.error('[ATTENDANCE EXPORT]', err);
-    res.status(500).json({ error: 'Ошибка экспорта' });
   }
 });
 
