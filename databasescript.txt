@@ -86,18 +86,3 @@ CREATE INDEX idx_attendance_lesson ON attendance (lesson_id);
 
 -- Для быстрого поиска посещений по студенту
 CREATE INDEX idx_attendance_student ON attendance (student_id);
-
--- ================================================
--- 7. Примеры данных (опционально)
--- ================================================
-
--- INSERT INTO users (email, password, role) VALUES ('curator@example.com', '$2a$10$...', 'curator');
--- INSERT INTO groups (name, description, created_by) VALUES ('ИТ-204', 'Группа второго курса', 1);
--- INSERT INTO students (full_name, email, group_id) VALUES ('Иванов Иван', 'ivan@example.com', 1);
--- INSERT INTO students (full_name, email, group_id) VALUES ('Петров Петр', NULL, 1);
--- INSERT INTO lessons (date, lesson_num, title, group_id, subgroups) VALUES ('2026-02-15', 1, 'Введение в Node.js', 1, '[1,2]');
--- INSERT INTO attendance (student_id, lesson_id, status, note) VALUES (1, 1, 'П', NULL);
-
--- ================================================
--- ✅ База данных готова!
--- ================================================
